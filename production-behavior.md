@@ -29,30 +29,48 @@ This document describes externally observable behavior. It deliberately does not
 
 ## 3. Primary user journey
 
-1. The user provides or opens a workspace containing source records.
-2. The system indexes the records and makes their provenance visible.
-3. The user asks a question in ordinary language.
-4. The system identifies the relevant claims, evaluates their status and chronology, and returns an answer.
-5. Every factual claim has a receipt. The user can open the cited record at the cited location.
-6. If evidence is insufficient or conflicting, the system says so and asks a focused follow-up or presents the conflict.
-7. The user can delete a person or record. Subsequent answers no longer use deleted material.
-8. The documents are organized in "projects". When a user is granted access in a project, it has access to the documents.
-9. Users have different roles and permissions. For example, a manager can decide what documents are activated for use in a project.
-10. Each project has a useful visualization page. The specific content of the visualization is TBD.
-11. Users roles:
-Admin who controls the document visibility (activate/diactivate/delete it)
-Each project should have its own role, which can be granted to a basic user.
-Basic user - basic user can’t have access to any documents from projects.
+1. Documents are organized into projects. A user opens a project they have been granted access to.
+2. The system indexes the project's active documents and makes their provenance visible.
+3. The user asks a question in ordinary language about that project.
+4. The system identifies the relevant claims, evaluates their status and chronology, and returns an answer using only evidence available to that user in the project.
+5. Every factual claim has a receipt. The user can inspect the supporting quote and open the document at the cited location.
+6. If evidence is insufficient or conflicting, the system says so and asks a focused follow-up or presents the conflict. It does not generate unsupported factual claims.
+7. Project admins can activate, deactivate, or delete documents. The product also supports removing a selected person's names and contact information while preserving project actions and decisions.
+8. Each project has a visualization page. Its specific content is TBD.
 
-If a basic user is granted access to a project, then the user will have abilities to see documents and interact with them and the AI for that project. 
+### 3.1 Roles and project access
+
+| Role | Permissions |
+| --- | --- |
+| Basic user without project membership | Cannot access that project's documents, answers, or visualizations. |
+| Project member | Can read active documents and interact with the AI within that project. |
+| Project admin | Can manage project membership and activate, deactivate, or delete documents, in addition to project member permissions. |
+
+Membership and admin permissions are scoped to each project. Access to one project does not grant access to another.
+
+Access restrictions MUST apply to documents, AI answers, citation quotes, cached summaries, and visualizations. The system MUST NOT reveal inaccessible project information through any of these surfaces.
+
+Whether a separate system-wide admin role is needed remains open.
+
+### 3.2 Document activation
+
+Deactivating a document excludes it from subsequent AI answers and project visualizations without permanently deleting it. Reactivating it makes it eligible again.
+
+Cached material used for subsequent answers or visualizations MUST respect the current activation state.
+
+Whether members can browse inactive documents, and how previously displayed answers and their citations behave after deactivation, remain open decisions.
 
 ## 4. Required behaviors
 
 ### 4.1 Evidence and provenance
 
-For every factual statement, the response MUST include:
+Every factual claim MUST be supported by a source document and a precise location within it. The system MUST NOT generate unsupported factual claims. If the available evidence cannot answer the question, the system states that it cannot establish an answer from the available records.
 
-- Source link and short quote displayed with a small icon. The quote appears when the mouse is hovered above the icon. When clicked, the icon directs the user to the document.
+Each citation is displayed with a small icon next to the claim:
+
+- Hovering over, focusing on, or tapping the icon displays a short supporting quote.
+- Selecting the source link opens the document at the cited location.
+- The citation identifies the source document and the location supporting the claim, such as a page, paragraph, message, or timestamp.
 
 ### 4.2 Suggestion versus commitment
 
@@ -80,16 +98,21 @@ Sorting or filtering only by document date is insufficient when the content expl
 
 ### 4.4 Deletion and forgetting
 
-The user MUST be able to delete a person’s personal information. This includes information like name, contact, etc. The key point is being GDPR compliant. Deletion covers the source records, extracted claims, embeddings or indexes, cached summaries, and other derived answer material that could reproduce the deleted information.
+The deletion feature is motivated by GDPR compliance needs. The scope of this draft is removal of a selected person's **names and contact information**, such as email addresses, phone numbers, and postal addresses. This scope does not by itself establish full GDPR compliance.
 
-One way to approach this is to store the personal information separately from the main data. For example, in vector databases they can be metadata, in summarizations they can be mappings (im not sure if this is the correct word), so that we don’t have to compute everything after a deletion.
-
+Deletion MUST remove that information from source documents, extracted claims, citations and quoted excerpts, embeddings or indexes, cached summaries, and other derived answer material. Hiding it only when a query is answered is insufficient.
 
 After deletion completes:
 
-- The personal information of that individual cannot be retrieved anywhere
-- But the relevant actions and other information should be preserved. For example, person A did something to B. When A is deleted, the information should be [deleted user] did something to B.
+- The person's names and contact information MUST no longer be retrievable from the system's documents or derived data.
+- Relevant project actions, decisions, and other information MUST remain available, with the person's attribution replaced by `[deleted user]`.
+- For example, “Alice agreed to the October launch” becomes “[deleted user] agreed to the October launch.” The agreed date remains answerable.
+- Citations and source views MUST show the updated content without exposing the removed names or contact information.
 
-The system MUST provide a clear failure state if deletion is incomplete. It MUST NOT claim the person is forgotten while derived data remains queryable.
+The system MUST provide a clear failure state if deletion is incomplete. It MUST NOT report completion while the names or contact information remain retrievable from source or derived material.
 
+The role authorized to request personal-information deletion, and whether that deletion applies to one project or all projects, remain open decisions.
 
+## 5. Implementation idea for later review
+
+One possible approach is to store names and contact information separately from project facts and use references to that information in summaries and other derived material. This is a design idea, not a required implementation. Whatever approach is chosen must satisfy the deletion behavior above, including removing information already present in source text or derived data.
