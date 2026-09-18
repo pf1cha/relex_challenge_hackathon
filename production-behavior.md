@@ -36,21 +36,23 @@ This document describes externally observable behavior. It deliberately does not
 5. Every factual claim has a receipt. The user can open the cited record at the cited location.
 6. If evidence is insufficient or conflicting, the system says so and asks a focused follow-up or presents the conflict.
 7. The user can delete a person or record. Subsequent answers no longer use deleted material.
+8. The documents are organized in "projects". When a user is granted access in a project, it has access to the documents.
+9. Users have different roles and permissions. For example, a manager can decide what documents are activated for use in a project.
+10. Each project has a useful visualization page. The specific content of the visualization is TBD.
+11. Users roles:
+Admin who controls the document visibility (activate/diactivate/delete it)
+Each project should have its own role, which can be granted to a basic user.
+Basic user - basic user can’t have access to any documents from projects.
+
+If a basic user is granted access to a project, then the user will have abilities to see documents and interact with them and the AI for that project. 
 
 ## 4. Required behaviors
 
 ### 4.1 Evidence and provenance
 
-For every factual statement, the response MUST include a receipt containing:
+For every factual statement, the response MUST include:
 
-- source title or stable record identifier;
-- source type and date when available;
-- a precise location, such as page, paragraph, message, timestamp, or line range;
-- a short quoted or otherwise inspectable excerpt.
-
-The receipt MUST point to the evidence that supports the claim, rather than merely to a related document. If no source supports a statement, the system MUST label it as an inference or say that it cannot establish it. It MUST NOT present an unsupported statement as fact.
-
-If multiple records support materially different versions, the answer MUST show the conflict and identify the records. The system MUST NOT silently select a convenient version.
+- Source link and short quote displayed with a small icon. The quote appears when the mouse is hovered above the icon. When clicked, the icon directs the user to the document.
 
 ### 4.2 Suggestion versus commitment
 
@@ -78,102 +80,16 @@ Sorting or filtering only by document date is insufficient when the content expl
 
 ### 4.4 Deletion and forgetting
 
-The user MUST be able to delete a person and the associated evidence. Deletion covers the source records, extracted claims, embeddings or indexes, cached summaries, and other derived answer material that could reproduce the deleted information.
+The user MUST be able to delete a person’s personal information. This includes information like name, contact, etc. The key point is being GDPR compliant. Deletion covers the source records, extracted claims, embeddings or indexes, cached summaries, and other derived answer material that could reproduce the deleted information.
+
+One way to approach this is to store the personal information separately from the main data. For example, in vector databases they can be metadata, in summarizations they can be mappings (im not sure if this is the correct word), so that we don’t have to compute everything after a deletion.
+
 
 After deletion completes:
 
-- new searches and answers MUST exclude the deleted material;
-- cached answers MUST be invalidated or recomputed;
-- the system MUST report what was deleted and any remaining evidence that does not belong to that person;
-- a citation to deleted material MUST no longer open or be returned.
+- The personal information of that individual cannot be retrieved anywhere
+- But the relevant actions and other information should be preserved. For example, person A did something to B. When A is deleted, the information should be [deleted user] did something to B.
 
 The system MUST provide a clear failure state if deletion is incomplete. It MUST NOT claim the person is forgotten while derived data remains queryable.
 
-### 4.5 Unasked useful action
-
-The product MUST demonstrate at least one safe, useful action it can perform from the evidence without an exact user command. The action MUST be understandable, reversible where applicable, and grounded in cited records.
-
-Acceptable examples include preparing a decision timeline, flagging an unresolved conflict, identifying an owner and overdue commitment, or drafting a follow-up question. The system MUST distinguish a prepared suggestion from an action that changed external state. It MUST report what it did, why it did it, and what evidence triggered it.
-
-## 5. Answer contract
-
-Every answer follows this shape, adapted to the question:
-
-1. **Answer:** direct response in plain language.
-2. **Status:** current, stale, suggested, committed, contradicted, unknown, or mixed.
-3. **Receipts:** one or more inspectable citations attached to each material claim.
-4. **Changes/conflicts:** later revisions, disagreements, or missing evidence.
-5. **Next step:** a focused clarification or safe unasked action when useful.
-
-The system MUST avoid a single clean summary when the evidence does not support one. It SHOULD prefer a concise uncertainty statement over fabricated precision.
-
-## 6. Ingestion and record behavior
-
-On ingest, the system MUST preserve the original record, source identity, ingestion time, and any available author/date metadata. It MUST make indexing status visible: processing, ready, failed, or partially indexed.
-
-If a record cannot be read, is ambiguous, or is only partially indexed, the system MUST say so. It MUST NOT imply complete coverage. Re-ingesting an updated record MUST preserve enough version information to explain why an answer changed.
-
-## 7. Failure and edge cases
-
-- **No relevant evidence:** say that no supporting record was found; do not answer from general knowledge as if it came from the workspace.
-- **Conflicting evidence:** present both sides, dates, and receipts; ask which source should govern if the user needs a final state.
-- **Ambiguous identity:** ask for clarification before attributing a claim to a person.
-- **Missing location:** cite the record and explain that a precise location is unavailable; treat the claim as lower confidence.
-- **Deleted source during a query:** discard the affected result and return a deletion-in-progress or unavailable state.
-- **External action unavailable:** provide a draft or preview and state that no external change was made.
-
-## 8. Acceptance scenarios
-
-### Scenario A: reversed decision
-
-Given an earlier record says “use vendor A” and a later record says “we will use vendor B,” when the user asks which vendor was chosen, the system reports vendor B as current, cites both records, and explains the reversal.
-
-### Scenario B: suggestion mistaken for agreement
-
-Given a consultant proposes a date and no one accepts it, when the user asks what date was agreed, the system says no date is established and cites the proposal as a suggestion.
-
-### Scenario C: never-true record
-
-Given a status report repeats a claim later shown to be false, when the user asks about it, the system identifies it as contradicted or never true and does not repeat it as current fact.
-
-### Scenario D: deletion
-
-Given a person appears in records, extracted claims, and cached summaries, when the user deletes that person, subsequent search and answer results exclude those materials and the system reports completion or a concrete failure.
-
-### Scenario E: unasked action
-
-Given the records contain an owner and an overdue commitment, when the workspace is opened, the system offers a grounded follow-up or overdue flag with a receipt and makes clear whether anything was actually sent or changed.
-
-## 9. Non-goals for this draft
-
-- Defining the AI model or prompt.
-- Defining the storage, vector database, or indexing technology.
-- Guaranteeing truth outside the supplied records.
-- Sending messages, changing project systems, or taking irreversible actions without an explicit product policy and user-visible confirmation.
-
-## 10. Open questions for review
-
-1. What record types and maximum workspace size must the first demo support?
-2. What counts as explicit acceptance in the target organization’s language?
-3. Which timestamp wins when record metadata and message content disagree?
-4. Is deletion scoped to a person, a record, a workspace, or all three?
-5. Which unasked action will be demonstrated, and what approval boundary does it have?
-6. What citation formats can the demo reliably open (page, timestamp, message, paragraph, or line)?
-7. What is the minimum acceptable behavior when indexing or deletion is only partial?
-
-## 11. Traceability to the challenge brief
-
-| Brief requirement | This specification |
-| --- | --- |
-| “Cite everything” | 4.1, 5 |
-| “Suggestion != commitment” | 4.2 |
-| “Know stale from wrong” | 4.3 |
-| “Delete a person” | 4.4 |
-| “Do one thing unasked” | 4.5 |
-| Provenance 25% | 4.1, 5 |
-| Attribution 20% | 4.2 |
-| Currency 20% | 4.3 |
-| Deletion 20% | 4.4 |
-| Initiative 15% | 4.5 |
-| URL submission and live questions | 8, 9, and the acceptance scenarios |
 
