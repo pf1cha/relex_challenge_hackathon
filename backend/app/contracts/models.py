@@ -112,6 +112,8 @@ class SourceLocation(DTO):
     message_ordinal: StrictInt | None
     turn_ordinal: StrictInt | None
     timestamp_label: str | None
+    speaker_label: str | None = None
+    provenance: Literal['original', 'quoted', 'forwarded'] = 'original'
 
 class Span(DTO):
     span_id: Id
@@ -609,14 +611,18 @@ class PrivacyEntity(DTO):
     kind: PrivacyEntityKind
     identity_hint: str | None = None
     evidence_span_ids: list[Id] = []
+    expected_text: str
     confidence: Literal['certain', 'uncertain']
 
 class PrivacyEdit(DTO):
     span_id: Id
     start: StrictInt
     end: StrictInt
+    expected_text: str
     replacement: str
     reason: Literal['identity', 'contact', 'private_cause', 'personal_identifier', 'contextual_risk']
+    sanitized_start: StrictInt | None = None
+    sanitized_end: StrictInt | None = None
 
 class PrivacyPlan(DTO):
     plan_id: Id
@@ -626,6 +632,10 @@ class PrivacyPlan(DTO):
     source_hash: Digest
     policy_version: str
     prompt_version: str
+    model_version: str
+    identity_revision: Revision
+    batch_hashes: list[Digest]
+    corrections_used: StrictInt
     entities: list[PrivacyEntity]
     edits: list[PrivacyEdit]
     covered_span_ids: list[Id]
@@ -637,6 +647,8 @@ class PrivacyDiagnostic(DTO):
     record_id: Id
     record_version: Version
     span_id: Id
+    start: StrictInt | None = None
+    end: StrictInt | None = None
     kind: PrivacyEntityKind
     reason: str
     state: Literal['open', 'resolved']

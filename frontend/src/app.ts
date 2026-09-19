@@ -2,6 +2,7 @@ import {api,ApiError,clearProject,clearSession,setCsrf,type Models} from "./api/
 import "./style.css";
 type Me=Models["Me"]; type Project=Models["Project"]; type Answer=Models["Answer"];
 type Job=Models["Job"]; type Receipt=Models["Receipt"]; type SourcePage=Models["SourcePage"];
+type PrivacyDiagnostic={id:string;record_id:string;record_version:number;span_id:string;start:number|null;end:number|null;kind:string;reason:string;state:"open"|"resolved";resolution:string|null;updated_at:string};
 type Page<T>={items:T[];next_cursor:string|null};
 const root=document.querySelector<HTMLDivElement>("#app")!;
 let registering=false;
@@ -169,7 +170,12 @@ async function administration(main:HTMLElement,mark:number){main.replaceChildren
  const erase=button("Erase personal information",async()=>{if(!confirm("Erase personal information for "+p.display_name+" ("+p.id+") in "+project?.name+"? Project decisions will remain with [deleted user] attribution."))return;row.append(jobRow(await api<Job>(base()+"/people/"+encodeURIComponent(p.id)+"/erase","POST")));});erase.disabled=p.state==="erasing";row.append(erase);
  return row;});
  const form=el("form"),id=input("Person ID (blank for new identity)"),name=input("Display name"),kind=select("Person kind",[["client","Client"],["employee","Employee"]]),contact=input("Contact value"),contactKind=select("Contact kind",[["email","Email"],["phone","Phone"],["postal_address","Postal address"]]),add=el("button","Associate person");add.type="submit";name.maxLength=255;contact.maxLength=500;
- form.append(id,name,kind,contactKind,contact,add);form.onsubmit=async e=>{e.preventDefault();try{await api(base()+"/people","POST",{...(id.value?{person_id:id.value}:{}),display_name:name.value,kind:kind.value,contacts:contact.value?[{kind:contactKind.value,value:contact.value}]:[]});renderView();}catch(e){showError(e);}};main.append(form);await refreshJobs(main,mark);
+ form.append(id,name,kind,contactKind,contact,add);form.onsubmit=async e=>{e.preventDefault();try{await api(base()+"/people","POST",{...(id.value?{person_id:id.value}:{}),display_name:name.value,kind:kind.value,contacts:contact.value?[{kind:contactKind.value,value:contact.value}]:[]});renderView();}catch(e){showError(e);}};main.append(form,el("h3","Privacy diagnostics"));
+ await pager<PrivacyDiagnostic>(main,base()+"/privacy/diagnostics",diagnostic=>{const row=el("article");
+  row.append(el("strong",diagnostic.kind+" · "+diagnostic.state),el("p",diagnostic.reason),el("small","Record "+diagnostic.record_id+" · version "+diagnostic.record_version+" · span "+diagnostic.span_id+(diagnostic.start===null?"":" · offsets "+diagnostic.start+"–"+diagnostic.end)));
+  if(diagnostic.state==="open"){const resolution=select("Privacy resolution",[["organization","Organization"],["role","Operational role"],["system_code","System code"],["contact","Contact"],["personal_identifier","Personal identifier"],["private_cause","Private cause"],["bind:","Bind to existing person ID"]]);const personId=input("Existing person ID");personId.hidden=true;resolution.onchange=()=>{personId.hidden=resolution.value!=="bind:";};const resolve=button("Apply resolution",async()=>{const value=resolution.value==="bind:"?"bind:"+personId.value.trim():resolution.value;if(!confirm("Apply this source-version-bound privacy resolution? The record will be reprocessed before publication."))return;await api(base()+"/privacy/diagnostics/"+encodeURIComponent(diagnostic.id)+"/resolve","POST",{resolution:value});await renderView();});row.append(resolution,personId,resolve);}
+  return row;});
+ await refreshJobs(main,mark);
 }
 async function start(){try{me=await api<Me>("/api/me");setCsrf(me.csrf_token);await loadProjects();}catch{me=null;render();}}
 start();

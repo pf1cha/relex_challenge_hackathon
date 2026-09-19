@@ -26,7 +26,7 @@ def password_hash(password, salt=None):
     salt=salt or secrets.token_hex(16)
     return salt+":"+hashlib.scrypt(password.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
 def fresh_state():
-    return dict(corpus_generation=0,privacy_generation=0,lifecycle_revision=0,reservation=0,write_barrier=False,members={},documents={},records={},people={},jobs={},memories={},chunks={},entries={},history={},checkpoints={},operations={},conversations={},messages={},attempts={},answers={},plans={},capabilities={},overview=None,privacy_plans={},privacy_diagnostics={},privacy_resolutions={})
+    return dict(corpus_generation=0,privacy_generation=0,lifecycle_revision=0,reservation=0,write_barrier=False,members={},documents={},records={},people={},jobs={},memories={},chunks={},entries={},history={},checkpoints={},operations={},conversations={},messages={},attempts={},answers={},plans={},capabilities={},overview=None,privacy_plans={},privacy_diagnostics={},privacy_resolutions={},access_epochs={})
 
 class EvidencePlatform:
     def __init__(self, db, secret, privacy_detector=None, upload_limit_bytes=10*1024*1024, request_deadline_seconds=120, lease_seconds=300):
@@ -35,6 +35,9 @@ class EvidencePlatform:
         self.privacy_detector=privacy_detector;self.upload_limit_bytes=upload_limit_bytes
         self.request_deadline_seconds=request_deadline_seconds;self.lease_seconds=lease_seconds
         self.auth=self.projects=self.documents=self.sources=self.administration=self.conversations=self
+        from .relational import load_project, sync_project
+        self.load_relational_project = load_project
+        self.sync_relational = sync_project
         self.reader=Reader(self);self.retrieval=self;self.artifacts=self
         from .jobs import Jobs, Ledger
         self.jobs=Jobs(self);self.ledger=Ledger(self)
@@ -68,6 +71,7 @@ class EvidencePlatform:
         async with self.db.connection() as c:
             require(await (await c.execute("SELECT id FROM users WHERE id=%s",(admin_id,))).fetchone(),"not_found")
             await c.execute("INSERT INTO projects(id,name,data) VALUES(%s,%s,%s) ON CONFLICT(id) DO NOTHING",(project_id,name,Jsonb(s)))
+            await self.sync_relational(c,project_id,s,restricted=True)
         return project_id
 
     async def _session(self,c,principal):
@@ -106,21 +110,25 @@ class EvidencePlatform:
     async def authorize(self,principal,project_id,required_role="member"):
         async with self.db.connection() as c:
             await self._session(c,principal)
-            r=await (await c.execute("SELECT data FROM projects WHERE id=%s",(project_id,))).fetchone()
-            require(r and principal.user_id in r["data"]["members"],"not_found")
-            s=r["data"];m=s["members"][principal.user_id]
-            require(required_role!="admin" or m["role"]=="admin","forbidden")
-            return RequestContext(user_id=principal.user_id,session_id=principal.session_id,project_id=project_id,role=m["role"],access_revision=m["revision"],**dump(self.snapshot(s)))
+            membership=await (await c.execute("SELECT role,access_revision FROM project_memberships WHERE project_id=%s AND user_id=%s",(project_id,principal.user_id))).fetchone()
+            require(membership,"not_found")
+            require(required_role!="admin" or membership["role"]=="admin","forbidden")
+            state=await self.load_relational_project(c,project_id)
+            require(state,"not_found")
+            return RequestContext(user_id=principal.user_id,session_id=principal.session_id,project_id=project_id,role=membership["role"],access_revision=membership["access_revision"],**dump(self.snapshot(state)))
 
     @asynccontextmanager
     async def transaction(self,ctx,admin=False,write=False,fresh=False):
         async with self.db.connection() as c:
             if isinstance(ctx,RequestContext):
                 await self._session(c,SessionPrincipal(user_id=ctx.user_id,session_id=ctx.session_id,expires_at=now()))
-            r=await (await c.execute("SELECT data FROM projects WHERE id=%s FOR UPDATE",(ctx.project_id,))).fetchone()
-            require(r,"not_found");s=r["data"]
+            s=await self.load_relational_project(c,ctx.project_id,restricted=True,for_update=True)
+            require(s,"not_found")
             if isinstance(ctx,RequestContext):
                 m=s["members"].get(ctx.user_id);require(m,"not_found")
+                normalized=await (await c.execute("SELECT role,access_revision FROM project_memberships WHERE project_id=%s AND user_id=%s",(ctx.project_id,ctx.user_id))).fetchone()
+                if normalized:
+                    m={"role":normalized["role"],"revision":normalized["access_revision"]}
                 require(not admin or m["role"]=="admin","forbidden")
                 require(m["revision"]==ctx.access_revision and m["role"]==ctx.role,"evidence_changed")
             else:
@@ -130,7 +138,7 @@ class EvidencePlatform:
             if fresh and isinstance(ctx,RequestContext):require(self.snapshot(s)==Snapshot(corpus_generation=ctx.corpus_generation,privacy_generation=ctx.privacy_generation),"evidence_changed")
             if write: require(not s["write_barrier"],"write_barrier")
             yield c,s
-            await c.execute("UPDATE projects SET data=%s WHERE id=%s",(Jsonb(s),ctx.project_id))
+            await self.sync_relational(c,ctx.project_id,s,restricted=True)
 
     def _cursor(self,binding,offset):
         raw=compact([binding,offset]);return base64.urlsafe_b64encode(raw.encode()).decode()+"."+self.keyed(raw)
@@ -151,9 +159,12 @@ class EvidencePlatform:
     async def list_projects(self,principal,page):
         async with self.db.connection() as c:
             await self._session(c,principal)
-            rows=await (await c.execute("SELECT id,name,data FROM projects WHERE data->'members' ? %s ORDER BY created_at,id",(principal.user_id,))).fetchall()
-            items=[Project(id=r["id"],name=r["name"],role=r["data"]["members"][principal.user_id]["role"]) for r in rows]
-            return self._page(items,page,["projects",principal.user_id,[[r["id"],r["data"]["members"][principal.user_id]["revision"]] for r in rows]])
+            rows=await (await c.execute(
+                "SELECT p.id,p.name,m.role,m.access_revision FROM projects p "
+                "JOIN project_memberships m ON m.project_id=p.id WHERE m.user_id=%s ORDER BY p.created_at,p.id",
+                (principal.user_id,))).fetchall()
+            items=[Project(id=r["id"],name=r["name"],role=r["role"]) for r in rows]
+            return self._page(items,page,["projects",principal.user_id,[[r["id"],r["access_revision"]] for r in rows]])
 
     def _document(self,s,document_id):
         d=s["documents"].get(document_id);require(d and not d.get("deleted"),"not_found");return d
@@ -314,6 +325,11 @@ class EvidencePlatform:
                 if pid!=person_id:require(not {c.value.casefold() for c in input.contacts}&{c["value"].casefold() for c in p["contacts"]},"ambiguous_person")
             p=Person(id=person_id,display_name=input.display_name,kind=input.kind,contacts=input.contacts,state="active")
             s["people"][person_id]=dump(p)
+            if input.person_id:
+                s["privacy_plans"]={}
+                for record in s["records"].values():
+                    record["quarantined"]=True
+                self._invalidate(s,privacy=True)
             return p
 
     def _active_lifecycle(self,s,kind,target):
@@ -386,13 +402,24 @@ class EvidencePlatform:
     async def resolve_privacy_diagnostic(self,ctx,diagnostic_id,resolution):
         require(1<=len(resolution)<=500,"invalid_input")
         async with self.transaction(ctx,admin=True,write=True) as (_,s):
-            raw=s.get("privacy_diagnostics",{}).get(diagnostic_id); require(raw,"not_found")
+            raw=s.get("privacy_diagnostics",{}).get(diagnostic_id);require(raw,"not_found")
+            require(raw["state"]=="open","invalid_input")
+            record=s["records"].get(raw["record_id"]);require(record and record["record_version"]==raw["record_version"],"evidence_changed")
+            allowed={"organization","role","system_code","contact","personal_identifier","private_cause"}
+            if resolution.startswith("bind:"):
+                require(resolution[5:] in s["people"],"invalid_input")
+            else:require(resolution in allowed,"invalid_input")
+            resolution_id=uid()
+            s.setdefault("privacy_resolutions",{})[resolution_id]={
+                "id":resolution_id,"diagnostic_id":diagnostic_id,"admin_user_id":ctx.user_id,
+                "record_id":raw["record_id"],"record_version":raw["record_version"],
+                "decision":resolution,"created_at":iso(),
+            }
             raw.update(state="resolved",resolution=resolution,updated_at=iso())
-            plan=s.get("privacy_plans",{}).get(f"{raw['record_id']}:{raw['record_version']}")
-            if plan: plan["unresolved_reasons"]=[x for x in plan.get("unresolved_reasons",[]) if x!=raw["reason"]]
+            s.get("privacy_plans",{}).pop(f"{raw['record_id']}:{raw['record_version']}",None)
+            record["quarantined"]=True
             self._invalidate(s,privacy=True)
             return PrivacyDiagnostic.model_validate(raw)
-
     async def retry_job(self,ctx,job_id):
         async with self.transaction(ctx,admin=True) as (_,s):
             require(job_id in s["jobs"],"not_found");j=s["jobs"][job_id];p=j["public"]
@@ -401,6 +428,8 @@ class EvidencePlatform:
             require(p["state"]=="failed" and p["retryable"],"invalid_input")
             require(j["lifecycle_revision"]==s["lifecycle_revision"],"evidence_changed")
             p.update(state="pending",error_code=None,retryable=False,updated_at=iso());j["lease_token"]=None
+            for document_id in j["work"]["document_ids"]:
+                if document_id in s["documents"]:s["documents"][document_id]["processing_state"]="pending"
             return Job.model_validate(p)
 
     def _conversation(self,s,ctx,conversation_id):
@@ -606,9 +635,9 @@ class EvidencePlatform:
     @asynccontextmanager
     async def cap_transaction(self,cap):
         async with self.db.connection() as c:
-            row=await (await c.execute("SELECT data FROM projects WHERE id=%s FOR UPDATE",(cap.project_id,))).fetchone();require(row,"capability_denied")
-            s=row["data"];self._cap(s,cap);yield c,s
-            await c.execute("UPDATE projects SET data=%s WHERE id=%s",(Jsonb(s),cap.project_id))
+            s=await self.load_relational_project(c,cap.project_id,restricted=True,for_update=True);require(s,"capability_denied")
+            self._cap(s,cap);yield c,s
+            await self.sync_relational(c,cap.project_id,s,restricted=True)
 
     def _staged(self,s,cap,ref):
         require(ref in cap.allowed_record_versions,"capability_denied")

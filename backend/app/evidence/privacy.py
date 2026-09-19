@@ -1,5 +1,5 @@
 """Restricted identity resolution; never guesses between same-name people."""
-import re, hashlib
+import re, hashlib, json
 from ..contracts.errors import DomainError
 from ..contracts.models import PrivacyPlan, PrivacyEntity, PrivacyEdit
 from ..contracts.models import NormalizedText
@@ -94,46 +94,118 @@ def person_occurs(record, person_id, people):
 
 
 class PrivacyAgent:
-    """Mandatory record-level semantic privacy stage backed by the configured model."""
+    """Mandatory bounded semantic classification with deterministic validation."""
     policy_version = "privacy-r3"
-    prompt_version = "privacy-plan-v1"
+    prompt_version = "privacy-plan-v2"
+    max_batch_codepoints = 24000
+    _personal_id = re.compile(r"(?<!\w)OP_ID\s*:?\s*[A-Za-z0-9-]+(?!\w)", re.I)
+    _temporal = re.compile(r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|today|tomorrow|until|through|by)\b|\b\d{4}-\d{2}(?:-\d{2})?\b", re.I)
+
     def __init__(self, provider):
         self.provider = provider
-    async def plan(self, project_id, record_id, record_version, spans, source_hash):
-        payload = {"record_id": record_id, "record_version": record_version,
-                   "source_hash": source_hash,
-                   "spans": [{"span_id": s["span_id"], "text": s["text"]} for s in spans]}
-        try:
-            result = await self.provider.generate("privacy",
-            "Classify every span. Return JSON with entities, edits, covered_span_ids, unresolved_reasons. "
-            "Use only source-bound ranges; preserve operational facts and uncertainty. Never invent dates.",
-                payload, max_tokens=8192)
-        except Exception:
-            raise DomainError("provider_unavailable") from None
-        try:
-            plan = PrivacyPlan(plan_id=str(__import__("uuid").uuid4()), project_id=project_id,
-                record_id=record_id, record_version=record_version, source_hash=source_hash,
-                policy_version=self.policy_version, prompt_version=self.prompt_version,
-                entities=[PrivacyEntity.model_validate(x) for x in result.get("entities", [])],
-                edits=[PrivacyEdit.model_validate(x) for x in result.get("edits", [])],
-                covered_span_ids=list(result.get("covered_span_ids", [])),
-                unresolved_reasons=list(result.get("unresolved_reasons", [])),
-                complete=bool(result.get("complete", False)))
-        except Exception:
-            raise DomainError("provider_unavailable") from None
-        by_id={s["span_id"]:s for s in spans}
-        if set(plan.covered_span_ids) != set(by_id) or not plan.complete:
-            raise DomainError("privacy_unresolved")
+
+    def _batches(self, spans):
+        batches=[];current=[];size=0
+        for span in spans:
+            length=len(span["text"])
+            if length > self.max_batch_codepoints:
+                raise DomainError("privacy_unresolved")
+            if current and size + length > self.max_batch_codepoints:
+                batches.append(current);current=[];size=0
+            current.append(span);size += length
+        if current:batches.append(current)
+        return batches
+
+    @staticmethod
+    def _contains(ranges, span_id, start, end, kinds=None):
+        return any(item.span_id==span_id and item.start<=start and item.end>=end and
+                   (kinds is None or item.kind in kinds) for item in ranges)
+
+    def _validate_batch(self, result, spans):
+        by_id={span["span_id"]:span for span in spans}
+        if result.get("complete") is not True or set(result.get("covered_span_ids",[])) != set(by_id):
+            raise ValueError("incomplete_coverage")
+        entities=[PrivacyEntity.model_validate(value) for value in result.get("entities",[])]
+        edits=[PrivacyEdit.model_validate(value) for value in result.get("edits",[])]
         occupied={}
-        for edit in sorted(plan.edits, key=lambda x:(x.span_id,x.start,x.end)):
-            span=by_id.get(edit.span_id)
-            if not span or edit.start < 0 or edit.end <= edit.start or edit.end > len(span["text"]):
-                raise DomainError("privacy_unresolved")
-            if edit.span_id in occupied and edit.start < occupied[edit.span_id]:
-                raise DomainError("privacy_unresolved")
+        for item in [*entities,*edits]:
+            span=by_id.get(item.span_id)
+            if span is None or item.start < 0 or item.end <= item.start or item.end > len(span["text"]):
+                raise ValueError("invalid_range")
+            if span["text"][item.start:item.end] != item.expected_text:
+                raise ValueError("source_mismatch")
+        for entity in entities:
+            if not set(entity.evidence_span_ids)<=set(by_id):raise ValueError("invalid_evidence")
+        for edit in sorted(edits,key=lambda value:(value.span_id,value.start,value.end)):
+            if edit.span_id in occupied and edit.start < occupied[edit.span_id]:raise ValueError("overlapping_edits")
             occupied[edit.span_id]=edit.end
-        for entity in plan.entities:
-            span=by_id.get(entity.span_id)
-            if not span or entity.start < 0 or entity.end <= entity.start or entity.end > len(span["text"]):
-                raise DomainError("privacy_unresolved")
-        return plan
+            expected={"identity":{"person"},"contact":{"contact"},"private_cause":{"contextual_circumstance"},
+                      "personal_identifier":{"personal_identifier"},"contextual_risk":{"uncertain"}}[edit.reason]
+            if not self._contains(entities,edit.span_id,edit.start,edit.end,expected):raise ValueError("unsupported_edit")
+            if edit.reason=="private_cause" and self._temporal.search(edit.expected_text):raise ValueError("operational_time_removed")
+            if edit.reason=="contextual_risk":raise ValueError("risk_must_not_rewrite")
+        for span in spans:
+            text=span["text"]
+            for pattern,kinds in ((EMAIL,{"contact"}),(PHONE,{"contact"}),(self._personal_id,{"personal_identifier"})):
+                for match in pattern.finditer(text):
+                    if not self._contains(entities,span["span_id"],match.start(),match.end(),kinds):
+                        raise ValueError("deterministic_candidate_missed")
+        reasons=result.get("unresolved_reasons",[])
+        if not isinstance(reasons,list) or any(not isinstance(value,str) or not value or len(value)>500 for value in reasons):
+            raise ValueError("invalid_unresolved_reason")
+        return entities,edits,reasons
+
+    async def _generate(self, payload, prior=None, error=None):
+        system=(
+            "You are the mandatory privacy classifier. Inspect every supplied span, including clean-looking spans. "
+            "Return one JSON object with complete=true, covered_span_ids, entities, edits, and unresolved_reasons. "
+            "Every entity/edit must use Python Unicode code-point start/end offsets and exact expected_text. Entity kinds: "
+            "person, organization, role, contact, personal_identifier, contextual_circumstance, uncertain. "
+            "Use evidence_span_ids and a record-local NEW_* identity_hint for supported new people; use a supplied PERSON_* only "
+            "when evidence supports that binding. Keep organizations and roles distinct from people. Flag singling-out context without "
+            "generalizing it. An edit may remove only a private cause, never an operational date/location/role, and must not invent prose. "
+            "Edit reasons: identity, contact, private_cause, personal_identifier. Uncertainty must remain unresolved."
+        )
+        request=dict(payload)
+        if prior is not None:
+            request["rejected_output"]=prior
+            request["validation_error"]=error
+            request["instruction"]="Correct the rejected output once; do not change or omit source coverage."
+        try:
+            return await self.provider.generate("privacy",system,request,max_tokens=8192)
+        except Exception:
+            raise DomainError("provider_unavailable") from None
+
+    async def plan(self,project_id,record_id,record_version,spans,source_hash,people=None,resolutions=None,identity_revision=0):
+        source_spans=[span for span in spans if not span["span_id"].startswith("title:")]
+        if hashlib.sha256("\n".join(span["text"] for span in source_spans).encode()).hexdigest()!=source_hash:
+            raise DomainError("privacy_unresolved")
+        batches=self._batches(spans);all_entities=[];all_edits=[];all_reasons=[];covered=[];hashes=[];corrections=0
+        known=[{"id":pid,"aliases":[person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]]}
+               for pid,person in sorted((people or {}).items())]
+        for index,batch in enumerate(batches):
+            payload={"record_id":record_id,"record_version":record_version,"source_hash":source_hash,
+                     "batch_index":index,"batch_count":len(batches),"known_identities":known,
+                     "admin_resolutions":resolutions or [],
+                     "previous_context":spans[spans.index(batch[0])-1]["text"][-500:] if spans.index(batch[0]) else None,
+                     "next_context":spans[spans.index(batch[-1])+1]["text"][:500] if spans.index(batch[-1])+1<len(spans) else None,
+                     "spans":[{"span_id":span["span_id"],"text":span["text"]} for span in batch]}
+            hashes.append(hashlib.sha256(json.dumps(payload["spans"],ensure_ascii=False,sort_keys=True).encode()).hexdigest())
+            result=await self._generate(payload)
+            try:
+                entities,edits,reasons=self._validate_batch(result,batch)
+            except Exception as exc:
+                corrections+=1
+                result=await self._generate(payload,result,str(exc))
+                try:entities,edits,reasons=self._validate_batch(result,batch)
+                except Exception:raise DomainError("privacy_unresolved") from None
+            all_entities.extend(entities);all_edits.extend(edits);all_reasons.extend(reasons)
+            covered.extend(result["covered_span_ids"])
+        model=getattr(getattr(self.provider,"settings",None),"model",None) or "configured-model"
+        plan_seed=f"{project_id}:{record_id}:{record_version}:{source_hash}:{self.policy_version}:{self.prompt_version}"
+        return PrivacyPlan(plan_id=str(__import__("uuid").uuid5(__import__("uuid").NAMESPACE_URL,plan_seed)),
+            project_id=project_id,record_id=record_id,record_version=record_version,source_hash=source_hash,
+            policy_version=self.policy_version,prompt_version=self.prompt_version,model_version=model,
+            identity_revision=identity_revision,
+            batch_hashes=hashes,corrections_used=corrections,entities=all_entities,edits=all_edits,
+            covered_span_ids=covered,unresolved_reasons=sorted(set(all_reasons)),complete=len(covered)==len(spans))
