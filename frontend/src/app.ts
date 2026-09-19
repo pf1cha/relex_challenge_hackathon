@@ -114,7 +114,7 @@ async function documents(main:HTMLElement,mark:number){main.replaceChildren(page
  if(project?.role==="admin")await refreshJobs(main,mark);
 }
 function jobRow(job:Job){const row=el("article");row.dataset.jobId=job.id;row.append(el("strong",job.kind+" · "+job.state),el("p","Stage: "+job.stage+" · "+job.id));
- if(job.error_code)row.append(el("p",job.error_code,"error"));if(job.retryable&&job.state==="failed")row.append(button("Retry job",async()=>{const next=await api<Job>(base()+"/jobs/"+encodeURIComponent(job.id)+"/retry","POST");row.replaceWith(jobRow(next));}));return row;}
+ if(job.error_code)row.append(el("p",job.error_code==="privacy_unresolved"?"Privacy review could not complete. The source may contain an unresolved identity or contextual decision, or the privacy model returned an invalid plan. Resolve the privacy diagnostic, then retry.":job.error_code,"error"));if(job.retryable&&job.state==="failed")row.append(button("Retry job",async()=>{const next=await api<Job>(base()+"/jobs/"+encodeURIComponent(job.id)+"/retry","POST");row.replaceWith(jobRow(next));}));return row;}
 async function refreshJobs(main:HTMLElement,mark:number){let section=main.querySelector<HTMLElement>("[data-jobs]");
  if(!section){section=el("section");section.dataset.jobs="true";main.append(section);}
  let previousStates:Map<string,string>|null=null;

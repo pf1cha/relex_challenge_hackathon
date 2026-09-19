@@ -14,6 +14,7 @@ ERRORS = {
  "idempotency_conflict": (409, "This request ID belongs to different input.", False),
  "last_admin": (409, "The project must retain an administrator.", False),
  "ambiguous_person": (409, "Select an unambiguous person identity.", False),
+ "privacy_unresolved": (409, "Privacy processing could not complete: the source contains an unresolved identity or contextual privacy decision, or the privacy model returned an invalid plan. Resolve the privacy diagnostic, then retry.", True),
  "source_unavailable": (410, "This source version is unavailable. Regenerate the answer.", False),
  "answer_unavailable": (410, "This answer is unavailable. Regenerate it.", False),
  "invalid_input": (422, "The request input is invalid.", False),
