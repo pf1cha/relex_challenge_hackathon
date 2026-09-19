@@ -154,6 +154,55 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
 .member-row button { margin: 0; }
 .state-badge { margin: 0 0 18px; }
 
+.panel-title { color: var(--ink); font-size: 16px; font-weight: 800; }
+.library-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.summary-item { display: grid; gap: 3px; min-height: 84px; align-content: center; padding: 16px 20px; border-right: 1px solid var(--line); }
+.summary-item:last-child { border-right: 0; }
+.summary-item strong { color: var(--accent-dark); font-size: 23px; }
+.summary-item span { color: var(--ink-soft); font-size: 11px; }
+.upload-panel { margin-bottom: 28px; padding: 20px; border: 1px solid #c9ddd2; border-left: 4px solid var(--accent); border-radius: 8px; background: #f4faf6; }
+.upload-panel .upload-form { margin-bottom: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.document-library > h2 { margin-top: 0; }
+.document-library > .pager-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.document-library .document-card { min-height: 210px; margin: 0; }
+
+.search-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.filter-panel, .results-panel, .conversation-rail, .chat-thread, .admin-panel, .health-panel { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.filter-panel { position: sticky; top: 102px; padding: 20px; }
+.search-form { display: grid; gap: 13px; margin: 18px 0 0; padding: 0; border: 0; box-shadow: none; }
+.search-form .search-query { width: 100%; }
+.search-form > button { width: 100%; margin-top: 4px; }
+.results-panel { min-height: 480px; padding: 20px; }
+.results-panel > .empty-state { margin-top: 18px; }
+.search-results { margin-top: 14px; }
+
+.chat-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
+.conversation-rail { position: sticky; top: 102px; padding: 20px; }
+.conversation-rail label { margin-top: 20px; }
+.conversation-rail select { width: 100%; }
+.chat-thread { display: flex; flex-direction: column; min-height: 570px; padding: 20px; }
+.chat-thread #messages { flex: 1 1 auto; margin-top: 0; }
+.chat-thread .composer { margin-bottom: 0; }
+
+.briefing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.briefing-grid > .empty-state { grid-column: 1 / -1; }
+.briefing-card { min-height: 180px; margin: 0; border-top: 3px solid var(--accent); }
+.health-panel { margin-top: 18px; padding: 22px; }
+.health-panel > p { max-width: 650px; color: var(--ink-soft); }
+.health-track { width: 100%; height: 8px; margin: 20px 0; overflow: hidden; border-radius: 99px; background: #e6ebe7; }
+.health-fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.health-detail { display: flex; align-items: baseline; gap: 9px; }
+.health-detail strong { color: var(--accent-dark); font-size: 24px; }
+.health-detail span { color: var(--ink-soft); font-size: 12px; }
+
+.admin-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 18px; margin-top: 20px; align-items: start; }
+.admin-panel { padding: 20px; }
+.admin-panel form { display: grid; align-items: stretch; margin-bottom: 0; padding: 16px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-soft); }
+.admin-panel form > button { width: 100%; }
+.admin-panel .member-row { grid-template-columns: minmax(120px, 1fr) auto; }
+.admin-panel .member-row small { grid-column: 1 / -1; }
+.admin-panel .member-row button { grid-column: 1 / -1; width: fit-content; }
+
 .auth-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(360px, 480px); gap: clamp(40px, 8vw, 110px); align-items: center; width: min(1120px, calc(100% - 48px)); min-height: calc(100vh - 68px); margin: 0 auto; padding: 56px 0; }
 .auth-intro { max-width: 620px; }
 .auth-intro h2 { max-width: 590px; margin: 13px 0 16px; color: var(--ink); font-size: clamp(36px, 5vw, 62px); font-weight: 770; line-height: 1.05; letter-spacing: 0; }
@@ -177,6 +226,9 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .auth-intro h2 { font-size: 42px; }
   .member-row { grid-template-columns: 1fr auto; }
   .member-row small { grid-column: 1 / -1; }
+  .document-library > .pager-rows, .briefing-grid { grid-template-columns: 1fr; }
+  .search-layout, .chat-layout, .admin-grid { grid-template-columns: 1fr; }
+  .filter-panel, .conversation-rail { position: static; }
 }
 
 @media (max-width: 680px) {
@@ -212,6 +264,11 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .auth-intro > p { font-size: 15px; }
   .auth-form { padding: 22px; }
   #receipt { top: 72px; right: 12px; width: calc(100% - 24px); max-height: calc(100vh - 84px); }
+  .library-summary { grid-template-columns: 1fr; }
+  .summary-item { min-height: 68px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .summary-item:last-child { border-bottom: 0; }
+  .upload-panel, .filter-panel, .results-panel, .conversation-rail, .chat-thread, .admin-panel, .health-panel { padding: 16px; }
+  .chat-thread { min-height: 480px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
