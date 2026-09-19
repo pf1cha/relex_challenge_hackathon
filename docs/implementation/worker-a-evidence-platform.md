@@ -1,14 +1,21 @@
 # Worker A — evidence, access and privacy lifecycle
 
-Read `README.md`, `architecture.md`, `shared-interfaces.md`, `http-api.md` and `independent-testing.md` first. Sources: production behavior §§3-4; architecture §§2-3,9-11; database sketch as design input only. Own `backend/app/evidence/`, contracts and the other A paths in the ownership table. Deliver the canonical foundation B and C consume, not a parallel UI or answer agent.
+Read `README.md`, `architecture.md`, `shared-interfaces.md`, `http-api.md`, `independent-testing.md` and `real-service-verification.md` first. Sources: production behavior §§3-4; architecture §§2-3,9-11; database sketch as design input only. Own `backend/app/evidence/`, contracts and the other A paths in the ownership table. Deliver the canonical foundation B and C consume, not a parallel UI or answer agent.
 
-## S-A — independent acceptance
+## Verification policy: real services
+
+Verification follows [real-service-verification.md](real-service-verification.md). Run the actual implementation against real PostgreSQL, Qdrant, configured model/reviewer/embedding services, FastAPI and a browser wherever the required operation uses them. Synthetic input documents are encouraged; fake service responses are not acceptance evidence.
+
+Contract tests, schema examples and fixture-service scenarios below are development aids. They may establish implementation readiness but cannot mark product behavior verified. Cross-slice live checks stay pending until real adapters are available. Independent code handoff remains allowed, explicitly labeled implementation-ready rather than live-verified; missing services are reported as blockers, never replaced by a mock pass.
+
+
+## S-A — independent development and live component verification
 
 Implement A1-A4 while B/C work independently. Use the G0 contracts and `independent-testing.md`. Own fixtures under `backend/tests/evidence/` and a runner under `scripts/evidence/`; maintain shared adapter-driven conformance cases under `backend/tests/contracts/`.
 
 Run real A services, migrations and durable jobs against isolated real PostgreSQL. Use A's direct PostgreSQL driver adapter and the local connection settings in architecture.md; a hosted database API is not required. A standalone tests use their own database/schema and can connect without C's server/bootstrap. Inject controllable B processing/rebuild/index-removal callbacks which return contract-valid artifacts and can fail, pause or report unknown write outcomes. Supply reviewed candidates at the contract boundary to exercise real A release transactions, exact quote/digest checks and races. No B/C implementation, model service or Qdrant is required for S-A. Optional model-assisted privacy detection uses a detector substitute for deterministic cases, with real detector checks reported separately.
 
-Cover auth, source versions, job restart/retry, publication, privacy inventory and write barriers. A substitute index proves A responds correctly to reported outcomes; actual Qdrant deletion/re-embedding and complete privacy-to-model/browser behavior remain G3/G4 assertions. Record these separately.
+Cover auth, source versions, job restart/retry, publication, privacy inventory and write barriers. A substitute index is a development aid only; verify claimed index lifecycle behavior through real Qdrant/B execution under G3/G4. Record these separately.
 
 ## A1 — authenticated project boundary and contract implementation
 
@@ -20,7 +27,7 @@ Acceptance: two projects with admin/member/outsider accounts; exercise every rep
 
 Handoff: typed contract imports, bootstrap instructions and seeded synthetic project IDs. B/C can proceed against these contracts immediately.
 
-Use shared contract revision 4 from `shared-interfaces.md`, including its begin/release/fail chat attempt sequence, exact DTOs and index-operation ledger. Include session identity in request context, caller-owned conversation lookup, atomic `release_answer`, restricted JobCapability and index-operation acknowledgement ports. Receipt resolution uses exact versions; changed receipts return unavailable rather than being silently remapped.
+Use shared contract revision 5 from `shared-interfaces.md`, including its begin/release/fail chat attempt sequence, exact DTOs and index-operation ledger. Include session identity in request context, caller-owned conversation lookup, atomic `release_answer`, restricted JobCapability and index-operation acknowledgement ports. Receipt resolution uses exact versions; changed receipts return unavailable rather than being silently remapped.
 
 ## A2 — upload to sanitized source
 
@@ -28,7 +35,7 @@ Implement durable import jobs and supported text parsers. Split bundled emails i
 
 Detect identities and contacts before memory/embedding calls. Assign project-local opaque IDs. Keep customer organizations separate from people; do not merge same-name people automatically. Use rules/entity detection and a configurable model adapter if required; quarantine ambiguous cases. Restrict raw/intermediate content. Preserve operational dates/actions when removing private context without inventing replacement facts.
 
-Expose current sanitized record pages and stable span resolution through A ports. Preserve safe original title/identity. Provide a separate job-capability read for sanitized staged versions so B can extract/index before publication; user-facing and agent reads cannot use it. C registers B processing handlers through the shared interface; records become published only after required memory/index work succeeds and A verifies versions. Recovery must survive process restart rather than depend on an in-memory thread. Persist job leases, stage idempotency keys, retry state and safe progress; reclaim expired leases after crashes.
+Expose current sanitized record pages and stable span resolution through A ports. Preserve safe original title/identity. Provide a separate job-capability read for sanitized staged versions so B can extract/index before publication; user-facing and agent reads cannot use it. C registers B processing handlers through the shared interface; records become published only after required memory/index work succeeds and A verifies versions. Recovery must survive process restart rather than depend on an in-memory thread. Implement the revision 5 load/stage checkpoint ports and CT-17: persist the exact ArtifactBatch before index work, reload it under a valid replacement lease, and deny checkpoints invalidated by erasure/source changes. Persist job leases, stage idempotency keys, retry state and safe progress; reclaim expired leases after crashes.
 
 Acceptance: bundled emails, quoted forwarding, transcript turns, standalone report, unknown dates, duplicate input, malformed input and two same-name people. Verify source boundaries in SQL. Assert downstream maintenance/answer/reviewer/embedding input capture for synthetic fixtures contains no original names/contacts; any model-assisted privacy detector is a separately restricted preprocessing operation as described in architecture.md. Inject failure after index write but before SQL publication; stale index candidates remain inaccessible and retry produces one current version.
 

@@ -1,6 +1,13 @@
 # Codebase architecture
 
-Delivery plan revision 4, 2026-09-19; service contract revision 4. Authoritative workspace: `/mnt/relex-kai` on `verda`. This is the implementation structure for the source behavior/agent docs, not a replacement for their requirements. Folder READMEs are scaffolding; application code is still to be implemented.
+Delivery plan revision 4, 2026-09-19; service contract revision 5. Authoritative workspace: `/mnt/relex-kai` on `verda`. This is the implementation structure for the source behavior/agent docs, not a replacement for their requirements. Folder READMEs are scaffolding; application code is still to be implemented.
+
+## Verification policy: real services
+
+Verification follows [real-service-verification.md](real-service-verification.md). Run the actual implementation against real PostgreSQL, Qdrant, configured model/reviewer/embedding services, FastAPI and a browser wherever the required operation uses them. Synthetic input documents are encouraged; fake service responses are not acceptance evidence.
+
+Contract tests, schema examples and fixture-service scenarios below are development aids. They may establish implementation readiness but cannot mark product behavior verified. Cross-slice live checks stay pending until real adapters are available. Independent code handoff remains allowed, explicitly labeled implementation-ready rather than live-verified; missing services are reported as blockers, never replaced by a mock pass.
+
 
 ## Structure
 
@@ -77,7 +84,7 @@ relex-0919/
 
 File names inside modules are the target decomposition, not a requirement to create empty files. Start each module when its first slice needs it. Keep Python under the `app` package; avoid a top-level `platform` package that can shadow Python's standard library. Frontend framework/bundler is C's implementation choice; backend authorization and evidence semantics must not depend on that choice.
 
-Detailed DTOs and protocol signatures live in [shared-interfaces.md](shared-interfaces.md); public route contracts live in [http-api.md](http-api.md). They define revision 4 and supersede the older shorthand. Source-scope differences remain explicit in the shared contract.
+Detailed DTOs and protocol signatures live in [shared-interfaces.md](shared-interfaces.md); public route contracts live in [http-api.md](http-api.md). They define contract revision 5 and supersede the older shorthand. Source-scope differences remain explicit in the shared contract.
 
 ## Dependency direction and ownership
 
@@ -142,7 +149,7 @@ Keep data persistent across application/job-process restarts and run migrations 
 - `backend/app/worker.py` starts the durable jobs loop. Both entry points use the same bootstrap and configured adapters. C documents explicit migration, bootstrap, HTTP and worker commands.
 - A records a job and sanitized staged version. A job-scoped capability lets B read only that version. B stages validated artifacts and Qdrant entries; A publishes after verifying version/dependency readiness. Public source, search and tools reject staged entries.
 - New records invalidate affected topic/project summaries and cached current-state answers. Invalidation occurs before the rebuild, with explicit pending state; no false complete overview.
-- Erasure/deactivation revokes eligibility first, then jobs clean/rebuild derived stores. Failed jobs retain quarantine. Durable lease expiry and idempotency keys allow restart without duplicate publication.
+- Erasure/deactivation revokes eligibility first, then jobs clean/rebuild derived stores. Failed jobs retain quarantine. Durable lease expiry and idempotency keys allow restart without duplicate publication. A persists revision 5 staged-artifact checkpoints before index dispatch; B reloads exact saved outputs on restart and resumes the index-operation ledger rather than rerunning checkpointed generation.
 - Final answer validation and persistence share a short SQL transaction serialized against relevant project mutations. The commit defines release order; HTTP delivery is not held under a database lock. Later reads always revalidate.
 
 ### Erasure, job fencing and index generations
@@ -177,4 +184,4 @@ Use no-store for sensitive responses, clear client state on logout/project chang
 
 ## Implementation acceptance
 
-S-A, S-B and S-C verify their real code and boundary contracts independently; C additionally verifies frontend build/typecheck and browser behavior. Production composition/startup is checked during G1-G4. Check no cross-imports between concrete evidence/intelligence packages and no HTTP dependency inside contracts. G1-G4 browser integration acceptance exercises all real services; S-C browser acceptance uses the contract substitutes described above. The worker specs define semantic/lifecycle cases. These folders and this document alone are not a running application.
+S-A, S-B and S-C support independent development and code handoff; behavioral verification requires actual service execution under real-service-verification.md. Frontend build/typecheck and boundary tests are supplemental only. Production composition/startup is checked during G1-G4. Check no cross-imports between concrete evidence/intelligence packages and no HTTP dependency inside contracts. G1-G4 browser acceptance exercises all real services; S-C browser fixture runs are development checks only and cannot pass product acceptance. The worker specs define semantic/lifecycle cases. These folders and this document alone are not a running application.

@@ -1,8 +1,15 @@
 # Shared service interfaces
 
-Contract revision 4 — 2026-09-19. Specification for implementation in `/mnt/relex-kai`. This document defines the A/B/C boundaries; [http-api.md](http-api.md) defines their public HTTP projection. It does not claim these interfaces are already implemented.
+Contract revision 5 — 2026-09-19. Specification for implementation in `/mnt/relex-kai`. This document defines the A/B/C boundaries; [http-api.md](http-api.md) defines their public HTTP projection. It does not claim these interfaces are already implemented.
 
-Revision 4 replaces the shorthand revision 3 signatures. It makes session authorization, chat reservations, pagination, staged artifacts, index-operation acknowledgement and fixture behavior explicit. Existing product requirements remain; the proposed role/privacy defaults in the implementation README remain proposals. A owns shared DTOs/protocols/errors; C owns HTTP schemas and composition. Changes to signatures or semantics require a contract revision and coordinated adapter updates.
+Revision 5 adds durable staged-artifact reload and recovery semantics to revision 4. Revision 4 replaced the shorthand revision 3 signatures. It makes session authorization, chat reservations, pagination, staged artifacts, index-operation acknowledgement and fixture behavior explicit. Existing product requirements remain; the proposed role/privacy defaults in the implementation README remain proposals. A owns shared DTOs/protocols/errors; C owns HTTP schemas and composition. Changes to signatures or semantics require a contract revision and coordinated adapter updates.
+
+## Verification policy: real services
+
+Verification follows [real-service-verification.md](real-service-verification.md). Run the actual implementation against real PostgreSQL, Qdrant, configured model/reviewer/embedding services, FastAPI and a browser wherever the required operation uses them. Synthetic input documents are encouraged; fake service responses are not acceptance evidence.
+
+Contract tests, schema examples and fixture-service scenarios below are development aids. They may establish implementation readiness but cannot mark product behavior verified. Cross-slice live checks stay pending until real adapters are available. Independent code handoff remains allowed, explicitly labeled implementation-ready rather than live-verified; missing services are reported as blockers, never replaced by a mock pass.
+
 
 ## 1. Ownership and dependency injection
 
@@ -466,6 +473,10 @@ MaintenanceResult {
   batch_id: Id?, operation_ids: Id[], changed_entry_ids: Id[],
   removed_entry_ids: Id[], unchanged_entry_ids: Id[]
 }
+StagedArtifacts {
+  artifact_key: string, batch: ArtifactBatch,
+  lifecycle_revision: Revision, publication_generation: Revision
+}
 OverviewCandidate {memory_id: Id, candidate: ReviewedCandidate}
 ```
 
@@ -481,7 +492,10 @@ A creates/validates capability scope and stage transitions. Tokens expire or bec
 ArtifactRepository.load_staged_record(cap: JobCapability, ref: RecordVersionRef) -> StagedRecord
 ArtifactRepository.published_context(cap: JobCapability) -> WorkReadContext
 ArtifactRepository.load_rebuild_plan(cap: JobCapability, plan_id: Id) -> RebuildPlan
-ArtifactRepository.stage_artifacts(cap: JobCapability, batch: ArtifactBatch) -> Id
+ArtifactRepository.load_staged_artifacts(cap: JobCapability,
+                                        artifact_key: string) -> StagedArtifacts | null
+ArtifactRepository.stage_artifacts(cap: JobCapability, artifact_key: string,
+                                  batch: ArtifactBatch) -> StagedArtifacts
 ArtifactRepository.release_overview(cap: JobCapability, input: OverviewCandidate) -> Overview
 
 MaintenanceHandlers.process_record(cap: JobCapability, ref: RecordVersionRef) -> MaintenanceResult
@@ -507,7 +521,7 @@ ReconciliationReport {
 }
 ```
 
-`claim` is the explicit nullable exception in the service notation: null means no available job. The durable runner is A-owned and invokes B handlers registered by C. Its internal WorkPlan contains only IDs, never raw personal text; it is not the public Job DTO. A updates the inventory/plan during its own parsing and erasure stages. `advance` checks the expected current stage and allowed transition under the live lease, atomically persisting progress. It advances recorded stages, obtains stage-specific capabilities, and publishes only after validating every required result, dependency and completed index operation. Handlers cannot mark a job completed themselves. A lease heartbeat cannot revive a superseded lease.
+`claim` returns null when no job is available. `load_staged_artifacts` returns null only when no checkpoint exists for the authorized job/key; stale or unauthorized checkpoints raise an error instead. The durable runner is A-owned and invokes B handlers registered by C. Its internal WorkPlan contains only IDs, never raw personal text; it is not the public Job DTO. A updates the inventory/plan during its own parsing and erasure stages. `advance` checks the expected current stage and allowed transition under the live lease, atomically persisting progress. It advances recorded stages, obtains stage-specific capabilities, and publishes only after validating every required result, dependency and completed index operation. Handlers cannot mark a job completed themselves. A lease heartbeat cannot revive a superseded lease.
 
 Allowed normal stage sequences are below. The coordinator owns each transition; handlers cannot skip a required stage by returning success.
 
@@ -524,7 +538,27 @@ Deletion may have no replacement content to rebuild; still record a zero-work st
 
 A base record batch publishes without waiting for topic/overview rebuilds. The publication transaction marks affected aggregates pending and creates rebuild jobs. Aggregate jobs use published contexts, stage dependency-bound summaries and release only grounding-reviewed overview claims. A changed dependency rejects aggregate publication. Proposed history is internal until consequential relations have passed B review.
 
-`stage_artifacts` is idempotent on job/batch/version and validates span membership, memory dependencies, source versions, chunk ordering and hash consistency. Same ID with different content is `contract_violation`. A verifies every required artifact for a base-record publication and marks ingestion complete only when every required record is published.
+### Durable staged-artifact recovery
+
+A stores one checkpoint per `(job_id, artifact_key)`. The key is compact JSON of `["record", record_id, record_version]` for record work, or `["aggregate", rebuild_plan_id]` for aggregate work; IDs retain their original bytes. The key does not contain a lease token, timestamp or randomly generated batch ID. All producers use the shared key encoder.
+
+B calls `load_staged_artifacts` before generating maintenance outputs. On a miss, B generates and validates the complete ArtifactBatch, then calls `stage_artifacts`. A atomically saves the batch and checkpoint mapping before returning. No index operation may be prepared or dispatched for that batch before staging succeeds. The batch includes the summaries, original timestamps/generator versions, chunk descriptors, dependencies and pinned embedding model/dimension/input hashes needed to continue.
+
+On a hit, B reuses the saved batch verbatim: no regeneration of summaries, history, IDs, timestamps or embedding-input definitions. It reads the authorized staged source spans to reconstruct the exact saved chunk inputs, verifies their hashes, then resumes the durable index-operation ledger. Embeddings may be recomputed from those identical inputs using the saved model/dimension if no verified completed index write can be reused. A missing saved model/provider is a visible retryable dependency failure, not permission to change the checkpoint.
+
+A validates capability scope, current lifecycle revision, source versions and dependencies on both checkpoint reads and writes. Ordinary lease renewal/retry may reload the same checkpoint under the replacement valid lease, retaining the original publication generation. An expired lease cannot read or save it. An erasure/source-version change makes the old checkpoint ineligible; it must not be returned as a cache miss and regenerated under the old job. A explicitly supersedes the obsolete work and schedules a new authorized job/plan when needed.
+
+Staging is idempotent on job/key and batch content. Repeating identical content returns the existing StagedArtifacts; different content under that key or batch ID is `contract_violation`. A never silently overwrites a saved checkpoint. Content comparison includes timestamps and metadata, so retry must reuse the saved values.
+
+After a crash:
+- Before checkpoint commit: no index write was allowed; generation may restart.
+- After checkpoint commit but before index dispatch: reload the batch and perform the missing index work without rerunning generation.
+- After index dispatch or acknowledgement: reload the batch and inspect recorded operation outcomes. Reconcile pending/in-flight/unknown outcomes before another write; do not assume an unacknowledged write failed. Reuse verified completed operations, then let A publish.
+- After publication but before the worker observes completion: A returns the already recorded publication/job result; no second record version or current index entry is created.
+
+Checkpoint data is restricted preprocessing/derived storage, included in person/document erasure and dependency invalidation. Neither member reads nor agent tools can load it. A verifies all required artifacts before base-record publication and completes ingestion only when every required record is published.
+
+Acceptance CT-17: persist an extraction checkpoint, stop the worker before indexing, restart and verify identical batch IDs/text/timestamps/hashes with no new maintenance-generation call. Repeat after index acknowledgement but before publication and verify one current version/entry set after recovery. Invalidate the lifecycle or source version and verify that the old checkpoint cannot be loaded or republished. A/B may develop checkpoint behavior using controlled outcomes and fixture ports. Acceptance executes the real worker with PostgreSQL, actual B processing and Qdrant; G1/G3 retain the persisted and provider-call evidence.
 
 ## 9. Durable external index operations
 
@@ -579,7 +613,7 @@ This is the only optional cross-slice provider interface that may receive restri
 
 ## 11. Required boundary examples and checks
 
-[contract-examples.json](contract-examples.json) contains synthetic public response examples shared with C's fixtures. They are data examples, not evidence of a live result. G0 must encode the DTOs/protocols above and validate those examples against exported schemas.
+[contract-examples.json](contract-examples.json) contains synthetic public response examples shared with C's fixtures. They are data examples, not evidence of a live result. G0 must encode the DTOs/protocols above. Checking examples against exported schemas is a development aid, not a substitute for running the product.
 
 | Case | Producer obligation | Consumer assertion |
 | --- | --- | --- |
@@ -599,6 +633,7 @@ This is the only optional cross-slice provider interface that may receive restri
 | CT-14 fixture composition | C starts real routes with only contracts and fixture ports | Browser flows need no A/B runtime imports |
 | CT-15 same-name people | A keeps distinct identity IDs | B filters IDs; C's erase confirmation targets one ID |
 | CT-16 erasure barrier | A blocks upload/association/chat publication | C keeps unsent input only in memory and shows retry |
+| CT-17 staged restart | A durably saves/reloads the exact authorized batch | B resumes index work without regenerating checkpointed model outputs; obsolete checkpoints are rejected |
 
 Protocol conformance cases run against real producers and consumer substitutes using adapter factories. Source/record/model quality is tested in the owning slice; the whole pipeline is still verified through G1-G4. Any unresolved signature/type/state decision blocks G0 readiness and must be added here rather than invented independently.
 

@@ -1,8 +1,15 @@
 # HTTP API and browser contract
 
-Contract revision 4 — 2026-09-19. Read [shared-interfaces.md](shared-interfaces.md) for DTO fields, domain rules and service ownership. This document is a specification, not a claim that routes already exist. C implements these actual routes against injected service interfaces.
+Contract revision 5 — 2026-09-19. Public HTTP shapes remain unchanged from revision 4; the internal checkpoint contract is now revision 5. Read [shared-interfaces.md](shared-interfaces.md) for DTO fields, domain rules and service ownership. This document is a specification, not a claim that routes already exist. C implements these actual routes against injected service interfaces.
 
 The API in this document is the application's browser-facing API. PostgreSQL may run locally and A connects directly using the native database protocol; that does not remove these routes or expose database credentials to the browser. A/B service calls inside the backend remain in-process interfaces.
+
+## Verification policy: real services
+
+Verification follows [real-service-verification.md](real-service-verification.md). Run the actual implementation against real PostgreSQL, Qdrant, configured model/reviewer/embedding services, FastAPI and a browser wherever the required operation uses them. Synthetic input documents are encouraged; fake service responses are not acceptance evidence.
+
+Contract tests, schema examples and fixture-service scenarios below are development aids. They may establish implementation readiness but cannot mark product behavior verified. Cross-slice live checks stay pending until real adapters are available. Independent code handoff remains allowed, explicitly labeled implementation-ready rather than live-verified; missing services are reported as blockers, never replaced by a mock pass.
+
 
 ## 1. Common transport rules
 
@@ -132,10 +139,10 @@ C's test composition injects fixture services into the real `create_app`. Scenar
 | overview-pending | Empty claims with pending state | Status only, no raw summary |
 | no-memberships | Empty project list | App accessible; no project-derived data |
 
-Fixtures establish C behavior only. A's real auth/SQL and B's live semantic quality are independently tested; real combined flows are required for G1-G4.
+Fixtures assist C's development only and do not verify product behavior. Real auth/SQL, live model/index services and the actual combined browser flows are required for acceptance.
 
 ## 7. Generated client and contract checks
 
 C exports OpenAPI from these actual routes and shared DTOs using fixture composition, without production services. Generate frontend types/client from that export; do not hand-maintain competing evidence shapes. G0 fixes the generator command and checks generation drift.
 
-Validate [contract-examples.json](contract-examples.json) against response schemas, then run shared CT-01 through CT-16 plus the scenarios above. Tests must assert forbidden fields are absent: session/lease tokens, identity mappings, raw input, review reasoning, internal operation tickets and unreviewed candidates. Fixtures may expose only the same public DTOs as production routes.
+Validate [contract-examples.json](contract-examples.json) against response schemas, then run shared CT-01 through CT-17 plus the scenarios above. Tests must assert forbidden fields are absent: session/lease tokens, identity mappings, raw input, review reasoning, internal operation tickets and unreviewed candidates. Fixtures may expose only the same public DTOs as production routes.

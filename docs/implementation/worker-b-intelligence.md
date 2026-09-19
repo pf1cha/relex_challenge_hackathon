@@ -1,14 +1,21 @@
 # Worker B — maintained memory, retrieval and reviewed answers
 
-Read `README.md`, `architecture.md`, `shared-interfaces.md`, `http-api.md` and `independent-testing.md` first. Sources: architecture §§4-8,10,12 and production behavior §4. Own `backend/app/intelligence/` and the other B paths. Depend on injected contract ports, never A's concrete repositories; C composes and exposes your service. Start from G0 contracts with prompts, schemas and owned test fixtures. B owns its live standalone fixtures; C owns shared integration fixtures.
+Read `README.md`, `architecture.md`, `shared-interfaces.md`, `http-api.md`, `independent-testing.md` and `real-service-verification.md` first. Sources: architecture §§4-8,10,12 and production behavior §4. Own `backend/app/intelligence/` and the other B paths. Depend on injected contract ports, never A's concrete repositories; C composes and exposes your service. Start from G0 contracts with prompts, schemas and owned test fixtures. B owns its live standalone fixtures; C owns shared integration fixtures.
 
-## S-B — independent acceptance
+## Verification policy: real services
+
+Verification follows [real-service-verification.md](real-service-verification.md). Run the actual implementation against real PostgreSQL, Qdrant, configured model/reviewer/embedding services, FastAPI and a browser wherever the required operation uses them. Synthetic input documents are encouraged; fake service responses are not acceptance evidence.
+
+Contract tests, schema examples and fixture-service scenarios below are development aids. They may establish implementation readiness but cannot mark product behavior verified. Cross-slice live checks stay pending until real adapters are available. Independent code handoff remains allowed, explicitly labeled implementation-ready rather than live-verified; missing services are reported as blockers, never replaced by a mock pass.
+
+
+## S-B — independent development and live component verification
 
 Implement B1-B4 while A/C work independently. Use G0 contracts and `independent-testing.md`. Own canonical repository/eligibility/lexical/staging substitutes and sanitized fixtures under `backend/tests/intelligence/`, plus a runner under `scripts/intelligence/`. Do not require A's repositories/migrations or C's server/bootstrap.
 
 Run actual B maintenance, chunking, fusion, expansion, chronology, answer/reviewer and index lifecycle code. Fixture ports supply ordered canonical spans, lexical candidates, version changes and controlled authorization failures; they capture staged outputs. Deterministic mode uses scripted providers for budgets/failures/repairs. Live mode uses the same canonical fixture boundary with real Qdrant, generation, reviewer and embeddings, including B-C1..9.
 
-S-B establishes B's behavior under the canonical contract. A's SQL lexical implementation, real authorization, atomic publication/release and end-to-end erasure remain integration checks. Assert B calls eligibility and rejects stale candidates; do not claim a fixture repository proves production security.
+S-B fixture runs help develop B independently. Verify B's behavior on real model/index services and the real canonical adapter before marking cross-slice requirements passed. SQL lexical retrieval, authorization, publication/release and erasure require the real A/B path. Assert B calls eligibility and rejects stale candidates; do not claim a fixture repository proves production security.
 
 ## B1 — evidence-linked memory and real indexing
 
@@ -16,7 +23,7 @@ Implement the registered `process_record` and `rebuild_affected` handlers. Gener
 
 Chunk within one record, preserving ordered stable spans and overlap mappings. Embed the concatenation of level 1, level 2 and that chunk's level 3 text. Use configured real embeddings, discover dimensions and validate collection compatibility. Index payload includes project/document/record/version/chunk/span IDs, topic/person IDs, known dates, publication generation and input hash. Never send identity mappings to the model or store original names in payloads.
 
-Build topic summaries from eligible source evidence, retaining transitive dependencies. Rebuild affected topics on addition/change/lifecycle events, not by continually summarizing the old summary. Build the project overview from current topic summaries with transitive source dependencies and explicit rebuild state; neither overview nor topic summaries can independently support final claims. Propose evidence-linked change notes by comparing related candidates, not every record pair. Review consequential replacement/correction links before publication. All output is staged until A's publication check. Obtain sanitized unpublished input only via A's job-capability port, never ordinary agent source reads.
+Build topic summaries from eligible source evidence, retaining transitive dependencies. Rebuild affected topics on addition/change/lifecycle events, not by continually summarizing the old summary. Build the project overview from current topic summaries with transitive source dependencies and explicit rebuild state; neither overview nor topic summaries can independently support final claims. Propose evidence-linked change notes by comparing related candidates, not every record pair. Review consequential replacement/correction links before publication. All output is staged until A's publication check. Obtain sanitized unpublished input only via A's job-capability port, never ordinary agent source reads. Use revision 5 staged-artifact checkpoints: load before generating, persist before index dispatch, and on retry reuse saved summaries/IDs/timestamps/hashes instead of regenerating them. Exercise CT-17, including resuming the index ledger and rejecting obsolete checkpoints.
 
 Acceptance: two related records produce sourced summaries and a topic overview; an unrelated addition leaves unaffected artifact versions/input hashes unchanged. Model-produced invalid span IDs prevent publication. Inspect real embedding requests/dimensions and current Qdrant payloads. Repeating a summary across chunks must be reflected in their input hashes.
 
@@ -72,6 +79,6 @@ Acceptance: real reviewer rejects deliberately unsupported attribution and a sta
 
 ## Done and dispatch prompt
 
-Record B1-B4 and B-C1..9 in `evidence-b.md`: actual model outputs, semantic assertions, prohibited claims, receipts, safe tool traces and failed attempts. Model stubs pass deterministic S-B checks only. S-B live acceptance requires real model/reviewer/embedding and Qdrant calls while A's ports may remain fixture-backed. G1-G4 additionally require real A/C implementations. Do not hide failed first attempts behind successful retries.
+Record B1-B4 and B-C1..9 in `evidence-b.md`: actual model outputs, semantic assertions, prohibited claims, receipts, safe tool traces and failed attempts. Model stubs and fixture repositories support development only. Live behavioral acceptance requires real model/reviewer/embedding and Qdrant calls plus real A repository adapters for canonical persistence/retrieval. G1-G4 also require the actual C application. Do not hide failed first attempts behind successful retries.
 
 > Implement Worker B in `/mnt/relex-kai` using this file and the shared README. Start from G0 contracts; implement B1-B4 and run S-B independently while A/C implement their slices. Use A's repository and eligibility interfaces and C's route composition. Own only B paths. Verify real retrieval, chronology and independent review with synthetic fixtures; preserve source docs and do not dispatch descendants or change another checkout.

@@ -1,22 +1,29 @@
 # Parallel implementation and independent acceptance
 
-Delivery plan revision 4, 2026-09-19. Three people own A, B and C and implement/test concurrently. The authoritative workspace is `/mnt/relex-kai` on `verda`. Service contract revision 4 details the shared interfaces; product behavior requirements remain unchanged.
+Delivery plan revision 4, 2026-09-19. Three people own A, B and C and implement/test concurrently. The authoritative workspace is `/mnt/relex-kai` on `verda`. Service contract revision 5 details the shared interfaces; product behavior requirements remain unchanged.
 
 This is a delivery specification. Runners and starter artifacts below are required deliverables, not commands verified to exist today.
 
-Read [shared-interfaces.md](shared-interfaces.md), [http-api.md](http-api.md) and [contract-examples.json](contract-examples.json) as the exact baseline for G0. Shared cases CT-01 through CT-16 are specified there; C's browser scenarios are in the HTTP contract. Validate public examples against generated response schemas when the types exist.
+Read [shared-interfaces.md](shared-interfaces.md), [http-api.md](http-api.md) and [contract-examples.json](contract-examples.json) as the exact baseline for G0. Shared cases CT-01 through CT-17 are specified there; C's browser scenarios are in the HTTP contract. Public examples may be checked against generated response schemas during development; this does not verify product behavior.
+
+## Verification policy: real services
+
+Verification follows [real-service-verification.md](real-service-verification.md). Run the actual implementation against real PostgreSQL, Qdrant, configured model/reviewer/embedding services, FastAPI and a browser wherever the required operation uses them. Synthetic input documents are encouraged; fake service responses are not acceptance evidence.
+
+Contract tests, schema examples and fixture-service scenarios below are development aids. They may establish implementation readiness but cannot mark product behavior verified. Cross-slice live checks stay pending until real adapters are available. Independent code handoff remains allowed, explicitly labeled implementation-ready rather than live-verified; missing services are reported as blockers, never replaced by a mock pass.
+
 
 ## Common starter, then three concurrent tracks
 
 G0 is bounded preparation before splitting implementation work. A supplies importable DTOs, complete port signatures, domain errors and adapter-driven conformance examples. Include staged artifacts/index-operation acknowledgements, not just request/response shapes. C supplies minimal packaging with independently installable test dependencies for each slice and inert package imports. Agree these dependencies up front; subsequent additions follow file ownership.
 
-Check in and record a common starter commit and contract revision. Include synthetic examples for contexts, record pages, job capabilities, staged artifacts, reviewed candidates, releases, receipts and errors in the shared contract tests. Validate examples against actual types. G0 requires no completed evidence service, model workflow or production app.
+Check in and record a common starter commit and contract revision. Include synthetic examples for contexts, record pages, job capabilities, staged artifacts, reviewed candidates, releases, receipts and errors in the shared contract tests. Example/type validation is a development aid. G0 requires no completed evidence service, model workflow or production app.
 
-Readiness means all three can import the same contracts and collect a minimal slice test without the other concrete packages or credentials. Prose alone does not satisfy G0. This shared setup replaces the old A1-before-B/C sequence. After G0 all three implementation and standalone acceptance tracks run simultaneously.
+G0 readiness means all three can import the same contracts and their owned entry points without the other concrete packages or credentials. Collecting a minimal test or checking JSON examples is optional development support, not product verification. Prose alone does not satisfy G0. This shared setup replaces the old A1-before-B/C sequence. After G0 all three implementation tracks run simultaneously; live acceptance runs as each operation's real dependencies become available.
 
-## Independent systems under test
+## Independent development setups
 
-| Slice | Real code | Substitute boundary | Infrastructure | Pass establishes |
+| Slice | Real code | Development substitute boundary | Infrastructure | Development evidence establishes |
 | --- | --- | --- | --- | --- |
 | S-A | Evidence, auth, migrations, durable jobs, privacy, publication and release | B processing/rebuild/index callbacks; reviewed candidates as inputs; optional privacy detector | Isolated real PostgreSQL | Canonical persistence, authorization and lifecycle under controlled external outcomes |
 | S-B | Memory, chunking, retrieval fusion/expansion, history, answer/review and index adapter | A canonical read, eligibility, lexical, normalization and staging ports | Deterministic: no external services. Live: own Qdrant and real generation/embedding endpoints | Workflow behavior and live semantic quality against controlled canonical evidence |
@@ -26,11 +33,11 @@ Substitutes implement a controllable contract scenario, not another person's ful
 
 A's PostgreSQL tests may use a locally running PostgreSQL server through a direct driver connection, with one isolated database/schema per run; no database HTTP API is needed. Connection settings follow architecture.md. B/C standalone tests remain independent of that server.
 
-A's PostgreSQL tests and C's browser tests are mandatory for their standalone passes. B reports deterministic and live lanes separately; missing live dependencies mean unverified, never passed.
+Actual PostgreSQL execution is required for A's owned persistence behavior. B's model/index evidence uses real services. C's final browser verification uses the real A/B application services. Report fixture/deterministic checks only as development results; missing live dependencies mean unverified, never passed.
 
-## Required runners and isolation
+## Development runners and separate live runners
 
-Each person supplies a runner and setup instructions in the owned script directory. Required invocation shape from repository root:
+Each person supplies an independent development runner and setup instructions in the owned script directory. The development commands below may use declared substitutes and do not pass behavioral acceptance:
 
 ```sh
 bash scripts/evidence/test-slice.sh --run-id a-dev
@@ -39,7 +46,7 @@ bash scripts/intelligence/test-slice.sh --mode live --run-id b-live
 bash scripts/product/test-slice.sh --run-id c-dev
 ```
 
-Each runner must:
+Each development runner must:
 
 - Run with only G0 plus its own slice; other concrete implementations may be absent. Test collection must not load production bootstrap or global fixtures that require all services.
 - Check prerequisites, give actionable setup instructions and fail on missing mandatory dependencies. Never silently switch a live lane to mocks.
@@ -48,7 +55,9 @@ Each runner must:
 - Return nonzero on failures or required unavailable checks. Report passed, failed and unverified cases separately and list substituted dependencies.
 - Record source/contract revision, commands, safe IDs and observed assertions in the slice's evidence report.
 
-Run S-A, S-B and S-C simultaneously once to establish isolation, and ensure repeated/concurrent runs of one slice also use unique resources. This parallel check requires no assembled application. Separate owned paths prevent file conflicts in the authoritative checkout; resource names prevent service conflicts.
+Behavioral verification uses the separate verify-live.sh commands in real-service-verification.md. Those commands must use real dependencies and may therefore need another slice's real adapter. Run two instances with distinct run IDs to verify live resource isolation; if real dependencies are unavailable, mark that live check pending. Fixture isolation is development evidence only.
+
+C separately coordinates one simultaneous A/B/C verify-live.sh run once all real runners/dependencies are available, recorded under G4. This uses real services, including the assembled application for C; fixture or development-runner concurrency does not pass it. It is not a prerequisite for independent implementation-ready handoff. A missing other slice leaves live verification pending without blocking that code handoff. Separate owned paths prevent file conflicts; resource names prevent service conflicts.
 
 ## Shared boundary conformance
 
@@ -63,21 +72,22 @@ Cover:
 - Reviewed candidate shapes, exact claim/receipt binding, release-changed outcomes and request idempotency.
 - Safe error responses and no unchecked candidate content returned by routes.
 
-Consumer substitutes prove consumer handling, not real provider behavior. Contracts must not drift silently: use explicit revisions and coordinated producer/consumer updates. Conformance tests reduce drift; G1-G4 still verify the real composition.
+Consumer substitutes help develop consumer handling; they are not real-service acceptance evidence. Contracts must not drift silently: use explicit revisions and coordinated producer/consumer updates. Conformance tests reduce drift; G1-G4 still verify the real composition.
 
 ## Separate slice acceptance from integration
 
 For every A1-A4, B1-B4 and C1-C4 acceptance case, record its standalone result, substitutes and remaining integration assertion. Preserve all original requirements.
 
-| Behavior | Standalone checks | Integration check |
+| Behavior | Independent development checks (not acceptance) | Required real-service check |
 | --- | --- | --- |
 | Upload and publication | A staging/publication with controlled callbacks; B valid artifacts from staged fixtures; C upload/job UI | G1 actual parsing, indexing, publication and member source access |
 | Answer and citations | B-C1..9 with live providers; A candidate validation/release races; C route ordering and receipt interactions | G2 actual retrieval, independent review, release and authorized sources |
 | Erasure and delayed writes | A barriers/retry with paused callbacks; B real index replacement/removal under fixture capabilities; C failed/retry states | G3 combined fencing and controlled-store cleanup, including late upserts |
 | Access changes | A real session/repository controls; B denied/stale canonical reads; C CSRF and withheld-response handling | G4 no leaks through assembled browser/API/caches |
-| Restart | A real job/database recovery; B index retry; C reload and fixture job discovery | G4 real service restart and durable product state |
+| Restart | A real job/database/checkpoint recovery; B checkpoint reload and index retry; C reload and fixture job discovery | G4 real service restart and durable product state |
+| Concurrent resources | Isolated development resources | Two instances of each live runner and G4 simultaneous A/B/C live runners |
 
-Independent handoff needs the slice's required checks and an explicit list of pending integration assertions. Another person's unfinished implementation cannot block that handoff. Full product completion still requires G1-G4 with real implementations/services and actual browser interaction.
+Independent code handoff may be implementation-ready with a list of pending live checks; another person's unfinished implementation cannot block that handoff. Only actually executed real-service behaviors receive live-verified status. Full product completion requires every required behavior and G1-G4 with real implementations/services and actual browser interaction.
 
 ## Ownership and handoff
 

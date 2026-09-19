@@ -1,8 +1,15 @@
 # Three-worker implementation plan
 
-Status: delivery plan revision 4, 2026-09-19. Three people implement and test A, B and C concurrently. Policy defaults remain proposals; service contract revision 4 expands the shared interfaces without changing the required product behavior. Read `architecture.md` for code layout, `shared-interfaces.md` and `http-api.md` for interface details, and `independent-testing.md` for standalone acceptance.
+Status: delivery plan revision 4, 2026-09-19. Three people implement and test A, B and C concurrently. Policy defaults remain proposals; service contract revision 5 expands the shared interfaces without changing the required product behavior. Read `architecture.md` for code layout, `shared-interfaces.md` and `http-api.md` for interface details, and `independent-testing.md` for standalone acceptance.
 
 This plan does not rely on another checkout's code or delivery contract.
+
+## Verification policy: real services
+
+Verification follows [real-service-verification.md](real-service-verification.md). Run the actual implementation against real PostgreSQL, Qdrant, configured model/reviewer/embedding services, FastAPI and a browser wherever the required operation uses them. Synthetic input documents are encouraged; fake service responses are not acceptance evidence.
+
+Contract tests, schema examples and fixture-service scenarios below are development aids. They may establish implementation readiness but cannot mark product behavior verified. Cross-slice live checks stay pending until real adapters are available. Independent code handoff remains allowed, explicitly labeled implementation-ready rather than live-verified; missing services are reported as blockers, never replaced by a mock pass.
+
 
 ## Source authority and scope
 
@@ -49,8 +56,8 @@ These are target ownership paths; inspect the current checkout before implementa
 
 ## Parallel execution and integration gates
 
-- **G0 — shared starter before parallel implementation:** Check in importable revision 4 DTOs/protocols/errors, contract examples/conformance cases and minimal packaging with per-slice test dependencies. A owns contract files and C packaging; this bounded setup requires no completed A1 or production implementation. The prose below alone is not a completed starter. See `independent-testing.md` for readiness.
-- **S-A / S-B / S-C — concurrent standalone acceptance:** All three people implement and test their real slice using substitutes at the other slices' contract boundaries. Each owns fixtures, runner and isolated resources. Tests must run without the other concrete implementations, C's production bootstrap or another person's development server. Standalone acceptance establishes each slice's behavior; G1-G4 establish the assembled product.
+- **G0 — shared starter before parallel implementation:** Check in importable revision 5 DTOs/protocols/errors, contract examples/conformance cases and minimal packaging with per-slice test dependencies. A owns contract files and C packaging; this bounded setup requires no completed A1 or production implementation. The prose below alone is not a completed starter. See `independent-testing.md` for readiness.
+- **S-A / S-B / S-C — concurrent independent development:** All three people implement and test their real slice using substitutes at the other slices' contract boundaries. Each owns fixtures, runner and isolated resources. Tests must run without the other concrete implementations, C's production bootstrap or another person's development server. These setups support independent implementation-ready handoff. Behavioral verification uses real services, and G1-G4 establish the assembled product.
 - **G1 — first vertical flow:** C accepts an admin upload; A persists a sanitized staged record under a job-scoped internal capability; B reads that staged version, creates memories and indexes it; A verifies dependencies and publishes the coherent version; C opens the source as a member. Staged records are never member/agent-readable. Verify outsider denial. A and B jointly validate the real durable job handler interface for G1; their standalone job tests proceed independently.
 - **G2 — reviewed chat:** B supplies search and answer service; C exposes it and renders claim receipts; A supplies final eligibility validation. Run the long-record and chronology cases in Worker B's spec.
 - **G3 — lifecycle:** A owns invalidation/erasure coordination, B rebuilds derived artifacts, C exposes job/retry and unavailable states. Run interruption and in-flight invalidation cases.
@@ -58,7 +65,7 @@ These are target ownership paths; inspect the current checkout before implementa
 
 After G0, A1-A4, B1-B4 and C1-C4 proceed concurrently. No standalone test or slice handoff waits for another implementation or shared integration fixtures. G1-G4 are separate integration gates, run as real adapters become available. Shared contract changes require a coordinated version update. Coordinator resolves cross-owner changes.
 
-## Shared contract revision 4
+## Shared contract revision 5
 
 The detailed contract is defined in:
 
@@ -67,14 +74,14 @@ The detailed contract is defined in:
 - [Synthetic contract examples](contract-examples.json): public responses and error scenarios for G0 schema checks and C fixtures.
 - [Independent testing](independent-testing.md): isolated runners, producer/consumer conformance and later G1-G4 integration.
 
-These documents replace the earlier shorthand signatures in this README. A owns the shared implementation of types/protocols/errors; C generates OpenAPI and its frontend client from the actual routes. G0 must turn the specification into importable contracts and validate the examples; documentation alone does not satisfy G0.
+These documents replace the earlier shorthand signatures in this README. A owns the shared implementation of types/protocols/errors; C generates OpenAPI and its frontend client from the actual routes. G0 must turn the specification into importable contracts and demonstrate actual imports/startup; documentation alone does not satisfy G0. Example/schema checks may aid development but are not behavioral acceptance.
 
 The source-compliance section in the service contract records the existing differences between broad UI requirements and provisional delivery scope. Do not silently add global-admin privileges or claim non-project chat/visualization completion. Evidence, project access, chronology, review and erasure requirements remain unchanged.
 
 ## Overall completion evidence
 
-Each worker records commands, exit status, relevant IDs/versions, observed outcomes and unresolved failures in its evidence file. Never record credentials or raw personal data in traces. Standalone tests may substitute other slices through shared contracts. B's live acceptance requires real model/reviewer/embedding and Qdrant calls. End-to-end G1-G4 require all real slices, real services and actual browser interactions; fake embeddings or a mock reviewer cannot pass those gates.
+Each worker records commands, exit status, relevant IDs/versions, observed outcomes and unresolved failures in its evidence file. Never record credentials or raw personal data in traces. Development checks may substitute other slices through shared contracts; product verification may not. B's live acceptance requires real model/reviewer/embedding and Qdrant calls. End-to-end G1-G4 require all real slices, real services and actual browser interactions; fake embeddings or a mock reviewer cannot pass those gates.
 
 Before standalone verification, each person checks their own required services/resources with synthetic data. Before G1-G4, C checks the assembled service/model availability and permitted compute allocation/browser route. Existing old delivery evidence is not current proof. Do not run services/heavy inference on login nodes or assume authorization to send the private corpus to a new provider. Default to synthetic fixtures. Record provider, model ID and embedding dimension safely. Identify unavailable prerequisites precisely rather than fabricating success.
 
-Independent slice handoff requires S-A, S-B or S-C in `independent-testing.md` with cross-slice claims marked integration pending. Overall product success additionally requires all acceptance cases with real adapters and G1-G4. The visualization content deferral and external retention limits remain explicit. This task produces specs only; it does not authorize deployment, dispatch, destructive corpus changes, or publication.
+Independent implementation-ready handoff uses S-A, S-B or S-C in `independent-testing.md` with all unexecuted real-service claims marked pending. Overall product success additionally requires all acceptance cases with real adapters and G1-G4. The visualization content deferral and external retention limits remain explicit. This task produces specs only; it does not authorize deployment, dispatch, destructive corpus changes, or publication.
