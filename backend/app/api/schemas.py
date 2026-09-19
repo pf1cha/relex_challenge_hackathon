@@ -6,6 +6,10 @@ from app.contracts.models import DTO, Id, Role, SearchFilters, PageRequest
 class LoginInput(DTO):
     email: Annotated[str, Field(min_length=1, max_length=320)]
     password: Annotated[str, Field(min_length=1, max_length=4096)]
+class RegisterInput(DTO):
+    email: Annotated[str, Field(min_length=3, max_length=320)]
+    password: Annotated[str, Field(min_length=10, max_length=4096)]
+    display_name: Annotated[str, Field(min_length=1, max_length=255)]
 class ConversationInput(DTO):
     title: Annotated[str, Field(min_length=1, max_length=120)] = "New Chat"
 class MemberInput(DTO):

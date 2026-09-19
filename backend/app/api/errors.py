@@ -2,6 +2,7 @@
 from fastapi.responses import JSONResponse
 
 ERRORS = {
+ "email_registered": (409, "This email is already registered. Sign in instead.", False),
  "unauthenticated": (401, "Please sign in.", False),
  "forbidden": (403, "Your project role cannot perform this action.", False),
  "csrf_failed": (403, "Request security validation failed.", False),

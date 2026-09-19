@@ -50,6 +50,18 @@ class EvidencePlatform:
             await c.execute("INSERT INTO users(id,email,display_name,password_hash) VALUES(%s,%s,%s,%s)",(user_id,email.casefold(),display_name,password_hash(password)))
             return user_id
 
+    async def register(self, email, password, display_name):
+        email=email.strip().casefold(); display_name=display_name.strip()
+        require(len(email)<=320 and re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+",email)
+                and 10<=len(password)<=4096 and 1<=len(display_name)<=255,"invalid_input")
+        async with self.db.connection() as c:
+            row=await (await c.execute(
+                "INSERT INTO users(id,email,display_name,password_hash) VALUES(%s,%s,%s,%s) "
+                "ON CONFLICT(email) DO NOTHING RETURNING id",
+                (uid(),email,display_name,password_hash(password)))).fetchone()
+            require(row,"email_registered")
+        return await self.login(email,password)
+
     async def bootstrap_project(self,name,admin_id,project_id=None):
         project_id=project_id or uid();s=fresh_state()
         s["members"][admin_id]=dict(role="admin",revision=1,granted_at=iso())

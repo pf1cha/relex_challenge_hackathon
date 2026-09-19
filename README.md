@@ -2,6 +2,8 @@
 
 Project-scoped document search, reviewed chat and exact source receipts. The Python backend talks directly to PostgreSQL; the browser uses authenticated FastAPI routes. Qdrant is a rebuildable candidate index. The durable worker runs separately from HTTP.
 
+See [Conda and product verification quickstart](docs/quickstart.md) for the installed verda environment.
+
 ## Setup
 
 Use Python 3.11+ and Node.js 22+. From the repository root:

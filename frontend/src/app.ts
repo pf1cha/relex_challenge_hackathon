@@ -4,6 +4,7 @@ type Me=Models["Me"]; type Project=Models["Project"]; type Answer=Models["Answer
 type Job=Models["Job"]; type Receipt=Models["Receipt"]; type SourcePage=Models["SourcePage"];
 type Page<T>={items:T[];next_cursor:string|null};
 const root=document.querySelector<HTMLDivElement>("#app")!;
+let registering=false;
 let me:Me|null=null, projects:Project[]=[], project:Project|null=null, view="documents";
 let conversation:string|null=null, pending:{question:string;conversation_id:string;request_id:string}|null=null;
 let questionDraft="", epoch=0, poll:number|undefined;
@@ -40,17 +41,26 @@ function render(skipView=false){
  const picker=select("Project",projects.map(p=>[p.id,p.name+" · "+p.role]),project?.id||"");
  picker.onchange=()=>{reset();project=projects.find(p=>p.id===picker.value)||null;history.replaceState(null,"","/");render();};
  root.append(field("Project",picker));
- if(!project){root.append(el("p","No project access has been assigned to this account."));return;}
+ if(!project){root.append(el("p","No project access has been assigned to this account. Share your account ID with a project administrator: "+me.user_id));return;}
  const nav=el("nav");
  for(const name of ["documents","search","chat","overview","visualization",...(project.role==="admin"?["administration"]:[])])
  nav.append(button(name[0].toUpperCase()+name.slice(1),()=>{view=name;render();},view===name?"selected":""));
  root.append(nav);const main=el("main");main.id="content";root.append(main);if(!skipView)renderView();
 }
-function login(){const form=el("form"),email=input("Email","email"),password=input("Password","password");
- email.autocomplete="username";password.autocomplete="current-password";
- const submit=el("button","Sign in");submit.type="submit";form.append(field("Email",email),field("Password",password),submit);
- form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{me=await api<Me>("/api/login","POST",{email:email.value,password:password.value});password.value="";setCsrf(me.csrf_token);await loadProjects();}catch(e){showError(e);}finally{submit.disabled=false;}};
- root.append(form);
+function login(){
+ const form=el("form"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
+ email.autocomplete="username";email.required=true;email.maxLength=320;
+ password.autocomplete=registering?"new-password":"current-password";password.required=true;password.maxLength=4096;
+ name.autocomplete="name";name.required=true;name.maxLength=255;
+ if(registering){password.minLength=10;form.append(field("Display name",name),el("p","Create an account. An administrator must grant access to a project."));}
+ const submit=el("button",registering?"Create account":"Sign in");submit.type="submit";
+ form.append(field("Email",email),field(registering?"Password (at least 10 characters)":"Password",password),submit);
+ form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{
+ me=await api<Me>(registering?"/api/register":"/api/login","POST",{
+ email:email.value.trim(),password:password.value,...(registering?{display_name:name.value.trim()}:{})});
+ password.value="";registering=false;setCsrf(me.csrf_token);await loadProjects();
+ }catch(e){showError(e);}finally{submit.disabled=false;}};
+ root.append(form,button(registering?"Back to sign in":"Register",()=>{registering=!registering;render();}));
 }
 async function loadProjects(){projects=await list<Project>("/api/projects");const source=location.pathname.match(/^\/projects\/([^/]+)\/sources\/([^/]+)$/);
  project=(source?projects.find(p=>p.id===decodeURIComponent(source[1])):projects[0])||null;render(!!source);

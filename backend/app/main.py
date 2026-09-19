@@ -13,7 +13,7 @@ from app.config import HttpSettings
 from app.contracts.models import *
 from app.contracts.ports import Services
 from app.contracts.errors import DomainError
-from app.api.schemas import LoginInput, ConversationInput, MemberInput, SearchBody
+from app.api.schemas import LoginInput, RegisterInput, ConversationInput, MemberInput, SearchBody
 from app.api.errors import error_response
 
 def create_app(services: Services, settings: HttpSettings) -> FastAPI:
@@ -95,6 +95,21 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
             raise DomainError("invalid_input")
         old = request.cookies.get("relex_session")
         result = await services.auth.login(body.email, body.password)
+        if old:
+            try:
+                await services.auth.logout(await services.auth.authenticate(old))
+            except DomainError as exc:
+                if exc.code != "unauthenticated": raise
+        response.set_cookie("relex_session", result.session_token, httponly=True,
+                            secure=settings.secure_cookie, samesite="lax", path="/")
+        return result.me
+    @app.post("/api/register", response_model=Me, status_code=201, dependencies=[Depends(no_query)])
+    async def register(body: RegisterInput, request: Request, response: Response):
+        origin(request)
+        if request.headers.get("content-type","").split(";")[0] != "application/json":
+            raise DomainError("invalid_input")
+        result = await services.auth.register(body.email, body.password, body.display_name)
+        old = request.cookies.get("relex_session")
         if old:
             try:
                 await services.auth.logout(await services.auth.authenticate(old))
