@@ -195,12 +195,7 @@ cython_debug/
 # .idea/
 .idea/
 
-# Frontend dependencies are reproducible from package-lock.json.
-frontend/node_modules/
-
 # FastAPI serves the production browser bundle from this tracked directory.
-# !frontend/dist/
-# !frontend/dist/**
 
 # Abstra
 #   Abstra is an AI-powered process automation framework.
@@ -219,11 +214,6 @@ tempCodeRunnerFile.py
 
 # Project-local editor and frontend dependencies
 .idea/
-frontend/node_modules/
-
-# The backend serves the compiled frontend directly.
-!frontend/dist/
-!frontend/dist/**
 
 # Ruff stuff:
 .ruff_cache/
