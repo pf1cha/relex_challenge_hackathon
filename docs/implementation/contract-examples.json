@@ -1,0 +1,398 @@
+{
+  "contract_revision": 4,
+  "synthetic": true,
+  "cases": [
+    {
+      "id": "login_success",
+      "method": "POST",
+      "path": "/api/login",
+      "status": 200,
+      "body": {
+        "user_id": "user-demo",
+        "display_name": "Demo Member",
+        "csrf_token": "synthetic-csrf-token",
+        "expires_at": "2026-09-20T10:00:00Z"
+      }
+    },
+    {
+      "id": "empty_projects",
+      "method": "GET",
+      "path": "/api/projects",
+      "status": 200,
+      "body": {
+        "items": [],
+        "next_cursor": null
+      }
+    },
+    {
+      "id": "upload_pending",
+      "method": "POST",
+      "path": "/api/projects/project-demo/documents",
+      "status": 202,
+      "body": {
+        "id": "job-demo",
+        "project_id": "project-demo",
+        "kind": "ingest",
+        "state": "pending",
+        "stage": "received",
+        "counts": {
+          "records": 0
+        },
+        "error_code": null,
+        "retryable": false,
+        "created_at": "2026-09-19T09:55:00Z",
+        "updated_at": "2026-09-19T09:55:00Z"
+      }
+    },
+    {
+      "id": "documents",
+      "method": "GET",
+      "path": "/api/projects/project-demo/documents",
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "id": "document-demo",
+            "project_id": "project-demo",
+            "title": "Synthetic launch meeting",
+            "record_type": "transcript",
+            "ai_status": "active",
+            "processing_state": "completed",
+            "record_count": 1,
+            "records_url": "/api/projects/project-demo/documents/document-demo/records",
+            "latest_job_id": "job-demo",
+            "created_at": "2026-09-19T09:55:00Z",
+            "updated_at": "2026-09-19T09:58:00Z"
+          }
+        ],
+        "next_cursor": null
+      }
+    },
+    {
+      "id": "record_complete",
+      "method": "GET",
+      "path": "/api/projects/project-demo/records/record-demo",
+      "status": 200,
+      "body": {
+        "record": {
+          "record_id": "record-demo",
+          "original_doc_id": "document-demo",
+          "record_version": 2,
+          "title": "Synthetic launch meeting",
+          "record_type": "transcript",
+          "source_time": {
+            "value": "2026-09-01",
+            "precision": "day",
+            "timezone": null
+          },
+          "total_chunks": 1
+        },
+        "spans": [
+          {
+            "span_id": "span-12",
+            "ordinal": 0,
+            "text": "The October launch is agreed.",
+            "source_location": {
+              "line_start": 12,
+              "line_end": 12,
+              "paragraph": null,
+              "message_ordinal": null,
+              "turn_ordinal": 4,
+              "timestamp_label": "10:05"
+            }
+          }
+        ],
+        "returned_chunk_ids": [
+          "chunk-1"
+        ],
+        "total_chunks": 1,
+        "next_cursor": null,
+        "complete": true,
+        "snapshot": {
+          "corpus_generation": 7,
+          "privacy_generation": 2
+        }
+      }
+    },
+    {
+      "id": "source_centered",
+      "method": "GET",
+      "path": "/api/projects/project-demo/sources/record-demo?version=2&span=span-12",
+      "status": 200,
+      "body": {
+        "record": {
+          "record_id": "record-demo",
+          "original_doc_id": "document-demo",
+          "record_version": 2,
+          "title": "Synthetic launch meeting",
+          "record_type": "transcript",
+          "source_time": {
+            "value": "2026-09-01",
+            "precision": "day",
+            "timezone": null
+          },
+          "total_chunks": 1
+        },
+        "spans": [
+          {
+            "span_id": "span-12",
+            "ordinal": 0,
+            "text": "The October launch is agreed.",
+            "source_location": {
+              "line_start": 12,
+              "line_end": 12,
+              "paragraph": null,
+              "message_ordinal": null,
+              "turn_ordinal": 4,
+              "timestamp_label": "10:05"
+            }
+          }
+        ],
+        "highlighted_span_ids": [
+          "span-12"
+        ],
+        "next_cursor": null,
+        "previous_cursor": null,
+        "snapshot": {
+          "corpus_generation": 7,
+          "privacy_generation": 2
+        }
+      }
+    },
+    {
+      "id": "search_success",
+      "method": "POST",
+      "path": "/api/projects/project-demo/search",
+      "request": {
+        "query": "What launch was agreed?",
+        "filters": {}
+      },
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "record": {
+              "record_id": "record-demo",
+              "original_doc_id": "document-demo",
+              "record_version": 2,
+              "title": "Synthetic launch meeting",
+              "record_type": "transcript",
+              "source_time": {
+                "value": "2026-09-01",
+                "precision": "day",
+                "timezone": null
+              },
+              "total_chunks": 1
+            },
+            "description": "Launch discussion",
+            "snippet": "The October launch is agreed.",
+            "matched_span_ids": [
+              "span-12"
+            ]
+          }
+        ],
+        "next_cursor": null,
+        "snapshot": {
+          "corpus_generation": 7,
+          "privacy_generation": 2
+        }
+      }
+    },
+    {
+      "id": "answer_success",
+      "method": "POST",
+      "path": "/api/projects/project-demo/chat",
+      "request": {
+        "question": "What launch was agreed?",
+        "conversation_id": "conversation-demo",
+        "request_id": "request-demo"
+      },
+      "status": 200,
+      "body": {
+        "id": "answer-demo",
+        "conversation_id": "conversation-demo",
+        "request_id": "request-demo",
+        "claims": [
+          {
+            "id": "claim-1",
+            "text": "The meeting records agreement to an October launch.",
+            "receipt_ids": [
+              "receipt-demo"
+            ],
+            "status": "commitment",
+            "scope": "demo launch",
+            "effective_at": null
+          }
+        ],
+        "receipts": [
+          {
+            "id": "receipt-demo",
+            "evidence_ref": {
+              "project_id": "project-demo",
+              "original_doc_id": "document-demo",
+              "record_id": "record-demo",
+              "record_version": 2,
+              "span_ids": [
+                "span-12"
+              ]
+            },
+            "quote": "The October launch is agreed.",
+            "source_url": "/projects/project-demo/sources/record-demo?version=2&span=span-12",
+            "source_title": "Synthetic launch meeting",
+            "record_type": "transcript",
+            "source_time": {
+              "value": "2026-09-01",
+              "precision": "day",
+              "timezone": null
+            },
+            "source_locations": [
+              {
+                "line_start": 12,
+                "line_end": 12,
+                "paragraph": null,
+                "message_ordinal": null,
+                "turn_ordinal": 4,
+                "timestamp_label": "10:05"
+              }
+            ]
+          }
+        ],
+        "coverage": {
+          "state": "complete",
+          "records": [
+            {
+              "record_id": "record-demo",
+              "record_version": 2,
+              "total_chunks": 1,
+              "supplied_chunk_ids": [
+                "chunk-1"
+              ],
+              "complete": true
+            }
+          ],
+          "limitations": []
+        },
+        "cannot_establish": null,
+        "snapshot": {
+          "corpus_generation": 7,
+          "privacy_generation": 2
+        },
+        "created_at": "2026-09-19T10:00:00Z"
+      }
+    },
+    {
+      "id": "receipt_success",
+      "method": "GET",
+      "path": "/api/projects/project-demo/answers/answer-demo/receipts/receipt-demo",
+      "status": 200,
+      "body": {
+        "id": "receipt-demo",
+        "evidence_ref": {
+          "project_id": "project-demo",
+          "original_doc_id": "document-demo",
+          "record_id": "record-demo",
+          "record_version": 2,
+          "span_ids": [
+            "span-12"
+          ]
+        },
+        "quote": "The October launch is agreed.",
+        "source_url": "/projects/project-demo/sources/record-demo?version=2&span=span-12",
+        "source_title": "Synthetic launch meeting",
+        "record_type": "transcript",
+        "source_time": {
+          "value": "2026-09-01",
+          "precision": "day",
+          "timezone": null
+        },
+        "source_locations": [
+          {
+            "line_start": 12,
+            "line_end": 12,
+            "paragraph": null,
+            "message_ordinal": null,
+            "turn_ordinal": 4,
+            "timestamp_label": "10:05"
+          }
+        ]
+      }
+    },
+    {
+      "id": "overview_pending",
+      "method": "GET",
+      "path": "/api/projects/project-demo/overview",
+      "status": 200,
+      "body": {
+        "state": "pending",
+        "id": null,
+        "claims": [],
+        "receipts": [],
+        "coverage": null,
+        "snapshot": {
+          "corpus_generation": 7,
+          "privacy_generation": 2
+        },
+        "error_code": null
+      }
+    },
+    {
+      "id": "release_changed",
+      "method": "POST",
+      "path": "/api/projects/project-demo/chat",
+      "status": 409,
+      "body": {
+        "error": {
+          "code": "evidence_changed",
+          "message": "Project evidence changed. Retry the request.",
+          "retryable": true
+        }
+      }
+    },
+    {
+      "id": "stale_receipt",
+      "method": "GET",
+      "path": "/api/projects/project-demo/answers/answer-demo/receipts/receipt-demo",
+      "status": 410,
+      "body": {
+        "error": {
+          "code": "source_unavailable",
+          "message": "This source version is unavailable. Regenerate the answer.",
+          "retryable": false
+        }
+      }
+    },
+    {
+      "id": "provider_unavailable",
+      "method": "POST",
+      "path": "/api/projects/project-demo/chat",
+      "status": 503,
+      "body": {
+        "error": {
+          "code": "provider_unavailable",
+          "message": "The answer service is temporarily unavailable.",
+          "retryable": true
+        }
+      }
+    },
+    {
+      "id": "erasure_failed",
+      "method": "GET",
+      "path": "/api/projects/project-demo/jobs/job-erasure",
+      "status": 200,
+      "body": {
+        "id": "job-erasure",
+        "project_id": "project-demo",
+        "kind": "erase_person",
+        "state": "failed",
+        "stage": "verifying",
+        "counts": {
+          "records": 1
+        },
+        "error_code": "cleanup_incomplete",
+        "retryable": true,
+        "created_at": "2026-09-19T09:55:00Z",
+        "updated_at": "2026-09-19T09:55:00Z"
+      }
+    }
+  ]
+}

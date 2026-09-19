@@ -1,6 +1,6 @@
 # Worker C — browser product, API composition and acceptance
 
-Read `README.md`, `architecture.md` and `independent-testing.md` first. Sources: all of user-features, production behavior §§3-4, architecture §§5,9,11-12. Own `frontend/`, `backend/app/api/`, backend composition/entry points and the other C paths. Assemble A/B services; do not reimplement their authorization, retrieval, privacy or review logic in routes or TypeScript.
+Read `README.md`, `architecture.md`, `shared-interfaces.md`, `http-api.md` and `independent-testing.md` first. Sources: all of user-features, production behavior §§3-4, architecture §§5,9,11-12. Own `frontend/`, `backend/app/api/`, backend composition/entry points and the other C paths. Assemble A/B services; do not reimplement their authorization, retrieval, privacy or review logic in routes or TypeScript.
 
 ## S-C — independent acceptance
 
@@ -14,7 +14,7 @@ S-C proves HTTP orchestration and browser behavior. Fixture login/jobs/releases 
 
 ## C1 — runnable shell, login and contract adapters
 
-Create dependency manifests, application entry point, environment example without secrets and startup instructions for the target project only. Wire A's migrations/bootstrap and durable job runner, and register B's handlers without circular imports. Load private configuration without printing credentials. Health reports actual database/index readiness; report model readiness separately rather than presenting connectivity as product completion. Services run within permitted compute allocations, with recorded job IDs/ports/data ownership and cleanup limited to owned processes.
+Create dependency manifests, application entry point, environment example without secrets and startup instructions for the target project only. Wire A's migrations/bootstrap and durable job runner, and register B's handlers without circular imports. Load private configuration without printing credentials. Document local PostgreSQL service/persistent-storage setup and `PGHOST/PGPORT/PGDATABASE/PGUSER/PGPASSWORD` configuration from architecture.md; wire A's native driver adapter into both backend processes. These settings are backend-only and are not a dependency of C's fixture-based standalone suite. Health reports actual database/index readiness; report model readiness separately rather than presenting connectivity as product completion. Services run within permitted compute allocations, with recorded job IDs/ports/data ownership and cleanup limited to owned processes.
 
 Implement `backend/app/bootstrap.py` as the sole concrete A/B wiring location, `main.py` as the ASGI factory and `worker.py` as the durable job-process entry point. Own shared configuration, backend packaging, frontend package/build/typecheck scripts and generated OpenAPI client. Keep frontend source/assets/tests under `frontend/`; do not embed the application in backend HTML strings. Serve the compiled frontend or use a same-origin development proxy; no provider keys reach browser assets.
 

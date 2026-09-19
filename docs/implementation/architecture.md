@@ -1,6 +1,6 @@
 # Codebase architecture
 
-Delivery plan revision 4, 2026-09-19; service contract revision 3. Authoritative workspace: `/mnt/relex-kai` on `verda`. This is the implementation structure for the source behavior/agent docs, not a replacement for their requirements. Folder READMEs are scaffolding; application code is still to be implemented.
+Delivery plan revision 4, 2026-09-19; service contract revision 4. Authoritative workspace: `/mnt/relex-kai` on `verda`. This is the implementation structure for the source behavior/agent docs, not a replacement for their requirements. Folder READMEs are scaffolding; application code is still to be implemented.
 
 ## Structure
 
@@ -50,7 +50,7 @@ relex-0919/
 │   │       └── routes/                # auth, projects, documents, sources,
 │   │                                 # chat, search, people, members, jobs
 │   ├── migrations/                   # A: SQL schema and migration runner
-│   └── tests/{evidence,intelligence,product}/
+│   └── tests/{contracts,evidence,intelligence,product}/
 ├── frontend/
 │   ├── README.md
 │   ├── package.json                   # C: build, typecheck, UI test commands
@@ -77,6 +77,8 @@ relex-0919/
 
 File names inside modules are the target decomposition, not a requirement to create empty files. Start each module when its first slice needs it. Keep Python under the `app` package; avoid a top-level `platform` package that can shadow Python's standard library. Frontend framework/bundler is C's implementation choice; backend authorization and evidence semantics must not depend on that choice.
 
+Detailed DTOs and protocol signatures live in [shared-interfaces.md](shared-interfaces.md); public route contracts live in [http-api.md](http-api.md). They define revision 4 and supersede the older shorthand. Source-scope differences remain explicit in the shared contract.
+
 ## Dependency direction and ownership
 
 ```text
@@ -98,11 +100,41 @@ A owns canonical ordered source spans; B owns chunking. B stages chunk descripto
 
 A, B and C develop concurrently from G0; follow `independent-testing.md`. Each slice accepts injected contract ports. Importing a slice or contracts must not import the other concrete slices, load production configuration, connect to services or start jobs.
 
-Production `bootstrap.py` remains the sole composition root for real A/B adapters. Test composition lives in each owner's test directory. C exposes `create_app(services)` for real routes with injected test services; importing that factory must not load production bootstrap. Browser tests exercise the actual routes and frontend, not a replacement fake HTTP application.
+Production `bootstrap.py` remains the sole composition root for real A/B adapters. Test composition lives in each owner's test directory. C exposes `create_app(services, settings)` for real routes with injected test services; importing that factory must not load production bootstrap. Browser tests exercise the actual routes and frontend, not a replacement fake HTTP application.
 
 Keep fixtures/substitutes within each slice's owned test directories. Shared adapter-driven contract cases live in `backend/tests/contracts/`; each person supplies adapter factories for its real implementation or consumer substitutes. No slice imports another's test helpers. Shared integration fixtures remain C-owned in `fixtures/implementation/`.
 
 G0 packaging provides minimal contract dependencies and independent test dependency groups. Tests collect and run with other concrete slices absent. Every runner owns unique databases/schemas, collections, ports and output directories so concurrent runs cannot reset another person's resources.
+
+## Local PostgreSQL and connection boundary
+
+Use a local PostgreSQL server alongside the backend on `verda` for the initial deployment. Here, local means the backend host, not the browser user's laptop. A native service or a PostgreSQL container with persistent storage is suitable; no hosted database HTTP API, REST database gateway or database-provider API key is required.
+
+```text
+Browser --HTTP--> C's FastAPI routes --> A/B services
+                                          |
+                                  A's PostgreSQL adapter
+                                          |
+                                 native PostgreSQL protocol
+                                          |
+                                 local PostgreSQL server
+```
+
+The HTTP process and durable job process each use A's direct database adapter with their own connection pool and the same configured database. Shared A/B interfaces are in-process Python calls, not extra HTTP services. B receives A's repository ports and does not open its own SQL connections. The browser continues to use C's authenticated API; direct database access does not replace project authorization, reviewed-answer release or source eligibility checks.
+
+C owns runtime configuration and setup instructions; A owns SQL migrations, queries, transaction boundaries and the PostgreSQL adapter. Use standard connection settings consistently in production composition and A's independent test runner:
+
+| Setting | Local example/default | Meaning |
+| --- | --- | --- |
+| `PGHOST` | `127.0.0.1` | Backend-side database host; a Unix socket directory is also valid |
+| `PGPORT` | `5432` | Configurable PostgreSQL port |
+| `PGDATABASE` | `relex` | Application database; tests must use their own name/schema |
+| `PGUSER` | `relex_app` | Application database role |
+| `PGPASSWORD` | No committed value | Private credential when required by the chosen local authentication method |
+
+These are configuration examples, not a claim that a server or role is already provisioned. Keep credentials in private server configuration and out of browser assets, connection-string logs and committed examples. If backend processes run in containers, `PGHOST` must name the reachable database service: `127.0.0.1` inside a container refers to that container, not the host.
+
+Keep data persistent across application/job-process restarts and run migrations explicitly. A's S-A suite can use the same local PostgreSQL server with a unique database/schema per run; it must never truncate the application database. B and C standalone suites keep their existing fixture boundaries and do not gain a database dependency. This changes database connection/deployment setup only; Qdrant and generation/embedding interfaces remain as documented.
 
 ## Runtime and publication
 
@@ -127,7 +159,7 @@ Publish sanitized records plus their required per-record memories/chunks first; 
 
 ### Receipt and conversation lifecycle
 
-For revision 3 choose the source docs' permitted unavailable behavior for version changes: an answer receipt whose record version or answer generation changed returns 410 and requests regeneration. It is not silently remapped to a new quote supporting potentially different wording. Direct source navigation can display current eligible sanitized content, but old-version deep links return unavailable. Citation popovers re-fetch the receipt before displaying a quote; source pages independently authorize. Corpus/privacy/access changes and logout invalidate follow-up context; load history server-side, remove invalid assistant evidence and normalize retained messages before provider calls.
+For the delivery slice choose the source docs' permitted unavailable behavior for version changes: an answer receipt whose record version or answer generation changed returns 410 and requests regeneration. It is not silently remapped to a new quote supporting potentially different wording. Direct source navigation can display current eligible sanitized content, but old-version deep links return unavailable. Citation popovers re-fetch the receipt before displaying a quote; source pages independently authorize. Corpus/privacy/access changes and logout invalidate follow-up context; load history server-side, remove invalid assistant evidence and normalize retained messages before provider calls.
 
 ## Data model changes from the DBML sketch
 

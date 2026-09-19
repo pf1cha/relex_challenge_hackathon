@@ -1,8 +1,10 @@
 # Parallel implementation and independent acceptance
 
-Delivery plan revision 4, 2026-09-19. Three people own A, B and C and implement/test concurrently. The authoritative workspace is `/mnt/relex-kai` on `verda`. Service contract revision 3 and product behavior requirements remain unchanged.
+Delivery plan revision 4, 2026-09-19. Three people own A, B and C and implement/test concurrently. The authoritative workspace is `/mnt/relex-kai` on `verda`. Service contract revision 4 details the shared interfaces; product behavior requirements remain unchanged.
 
 This is a delivery specification. Runners and starter artifacts below are required deliverables, not commands verified to exist today.
+
+Read [shared-interfaces.md](shared-interfaces.md), [http-api.md](http-api.md) and [contract-examples.json](contract-examples.json) as the exact baseline for G0. Shared cases CT-01 through CT-16 are specified there; C's browser scenarios are in the HTTP contract. Validate public examples against generated response schemas when the types exist.
 
 ## Common starter, then three concurrent tracks
 
@@ -21,6 +23,8 @@ Readiness means all three can import the same contracts and collect a minimal sl
 | S-C | Actual API routes, orchestration, frontend and browser interactions | A/B services injected into real app factory | Own test API server and real browser | HTTP and UI behavior without a completed backend domain implementation |
 
 Substitutes implement a controllable contract scenario, not another person's full logic. Never replace the owned behavior being accepted. C's tests must execute the actual chat route and citation UI, rather than intercepting all HTTP calls with canned responses.
+
+A's PostgreSQL tests may use a locally running PostgreSQL server through a direct driver connection, with one isolated database/schema per run; no database HTTP API is needed. Connection settings follow architecture.md. B/C standalone tests remain independent of that server.
 
 A's PostgreSQL tests and C's browser tests are mandatory for their standalone passes. B reports deterministic and live lanes separately; missing live dependencies mean unverified, never passed.
 

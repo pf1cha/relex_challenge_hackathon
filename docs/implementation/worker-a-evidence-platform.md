@@ -1,12 +1,12 @@
 # Worker A — evidence, access and privacy lifecycle
 
-Read `README.md`, `architecture.md` and `independent-testing.md` first. Sources: production behavior §§3-4; architecture §§2-3,9-11; database sketch as design input only. Own `backend/app/evidence/`, contracts and the other A paths in the ownership table. Deliver the canonical foundation B and C consume, not a parallel UI or answer agent.
+Read `README.md`, `architecture.md`, `shared-interfaces.md`, `http-api.md` and `independent-testing.md` first. Sources: production behavior §§3-4; architecture §§2-3,9-11; database sketch as design input only. Own `backend/app/evidence/`, contracts and the other A paths in the ownership table. Deliver the canonical foundation B and C consume, not a parallel UI or answer agent.
 
 ## S-A — independent acceptance
 
 Implement A1-A4 while B/C work independently. Use the G0 contracts and `independent-testing.md`. Own fixtures under `backend/tests/evidence/` and a runner under `scripts/evidence/`; maintain shared adapter-driven conformance cases under `backend/tests/contracts/`.
 
-Run real A services, migrations and durable jobs against isolated real PostgreSQL. Inject controllable B processing/rebuild/index-removal callbacks which return contract-valid artifacts and can fail, pause or report unknown write outcomes. Supply reviewed candidates at the contract boundary to exercise real A release transactions, exact quote/digest checks and races. No B/C implementation, model service or Qdrant is required for S-A. Optional model-assisted privacy detection uses a detector substitute for deterministic cases, with real detector checks reported separately.
+Run real A services, migrations and durable jobs against isolated real PostgreSQL. Use A's direct PostgreSQL driver adapter and the local connection settings in architecture.md; a hosted database API is not required. A standalone tests use their own database/schema and can connect without C's server/bootstrap. Inject controllable B processing/rebuild/index-removal callbacks which return contract-valid artifacts and can fail, pause or report unknown write outcomes. Supply reviewed candidates at the contract boundary to exercise real A release transactions, exact quote/digest checks and races. No B/C implementation, model service or Qdrant is required for S-A. Optional model-assisted privacy detection uses a detector substitute for deterministic cases, with real detector checks reported separately.
 
 Cover auth, source versions, job restart/retry, publication, privacy inventory and write barriers. A substitute index proves A responds correctly to reported outcomes; actual Qdrant deletion/re-embedding and complete privacy-to-model/browser behavior remain G3/G4 assertions. Record these separately.
 
@@ -20,7 +20,7 @@ Acceptance: two projects with admin/member/outsider accounts; exercise every rep
 
 Handoff: typed contract imports, bootstrap instructions and seeded synthetic project IDs. B/C can proceed against these contracts immediately.
 
-Use shared contract revision 3. Include session identity in request context, caller-owned conversation lookup, atomic `release_answer`, restricted JobCapability and index-operation acknowledgement ports. Receipt resolution uses exact versions; changed receipts return unavailable rather than being silently remapped.
+Use shared contract revision 4 from `shared-interfaces.md`, including its begin/release/fail chat attempt sequence, exact DTOs and index-operation ledger. Include session identity in request context, caller-owned conversation lookup, atomic `release_answer`, restricted JobCapability and index-operation acknowledgement ports. Receipt resolution uses exact versions; changed receipts return unavailable rather than being silently remapped.
 
 ## A2 — upload to sanitized source
 

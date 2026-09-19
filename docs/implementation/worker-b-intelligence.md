@@ -1,6 +1,6 @@
 # Worker B — maintained memory, retrieval and reviewed answers
 
-Read `README.md`, `architecture.md` and `independent-testing.md` first. Sources: architecture §§4-8,10,12 and production behavior §4. Own `backend/app/intelligence/` and the other B paths. Depend on injected contract ports, never A's concrete repositories; C composes and exposes your service. Start from G0 contracts with prompts, schemas and owned test fixtures. B owns its live standalone fixtures; C owns shared integration fixtures.
+Read `README.md`, `architecture.md`, `shared-interfaces.md`, `http-api.md` and `independent-testing.md` first. Sources: architecture §§4-8,10,12 and production behavior §4. Own `backend/app/intelligence/` and the other B paths. Depend on injected contract ports, never A's concrete repositories; C composes and exposes your service. Start from G0 contracts with prompts, schemas and owned test fixtures. B owns its live standalone fixtures; C owns shared integration fixtures.
 
 ## S-B — independent acceptance
 
