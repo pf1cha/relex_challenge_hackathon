@@ -63,4 +63,4 @@ On the current verda development host, project-local Python is `.venv-c/bin/pyth
 
 ## Product limits
 
-Project admin/member roles apply only to explicitly assigned projects. Personnel association is separate from membership. Overview includes an active-record timeline with explicitly labeled L1/L2 discovery summaries and dependency-backed processed-source links; broader aggregate visualization remains deferred. Erasure covers application-controlled stores; downloaded browser content, external provider retention and backups require separate retention handling. The product does not claim full GDPR compliance.
+Project admin/member roles apply only to explicitly assigned projects. Personnel association is separate from membership. Overview includes an active-record timeline with explicitly labeled, unreviewed L1/L2 discovery summaries and canonical processed-source links; broader aggregate visualization remains deferred. Erasure covers application-controlled stores; downloaded browser content, external provider retention and backups require separate retention handling. The product does not claim full GDPR compliance.

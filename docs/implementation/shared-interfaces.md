@@ -268,7 +268,7 @@ SourceRequest {record_id: Id, version: Version, span_id: Id, cursor?: string, li
 TimelineRecord {
   project_id: Id, record_id: Id, original_doc_id: Id, record_version: Version,
   title: string, record_type: RecordType, source_time: SourceTime,
-  level1_summary?: string, level2_summary?: string, processed_content_url?: string
+  level1_summary: string?, level2_summary: string?, processed_content_url: string?
 }
 PersonInput {
   person_id?: Id, display_name: string, kind: client | employee, contacts: Contact[]
@@ -281,7 +281,7 @@ The upload is bounded by C before materializing bytes; A independently validates
 
 Source preview purpose is derived server-side: `read_record` always uses active answer evidence; `read_source` may allow current sanitized inactive content for admins. The public caller cannot specify purpose. The requested exact record version and span must resolve or return unavailable. Browser source pagination remains centered initially and uses source-bound cursors thereafter.
 
-Only ready, grounding-reviewed overview claims are returned. All other overview states have empty claims/receipts. `TimelineRecord` is a separate discovery surface: it includes only published, non-quarantined records from active, non-deleted documents in the selected project. Its L1/L2 text is explicitly labeled routing/record-summary context, never a reviewed claim or answer evidence. The processed-content URL resolves the current record version at a valid summary dependency span. Timeline order normalizes source instants across offsets, places partial dates at their supported boundary, and retains unknown dates last. Operational counts are null for members. Authorization changes may continue during an erasure barrier; uploads, associations, conversations/chat persistence and ordinary publication cannot.
+Only ready, grounding-reviewed overview claims are returned. All other overview states have empty claims/receipts. `TimelineRecord` is a separate discovery surface: it includes only published, non-quarantined records from active, non-deleted documents in the selected project. Its L1/L2 text is explicitly labeled as unreviewed AI-generated routing/record-summary context, never a reviewed claim or answer evidence. The processed-content URL is navigation to the current eligible record, not a claim receipt: it prefers a valid summary dependency span and otherwise resolves the record's first current canonical span. It is null only when the record has no resolvable span. Timeline order normalizes source instants across offsets, places partial dates at their supported boundary, and retains unknown dates last. Operational counts are null for members. Authorization changes may continue during an erasure barrier; uploads, associations, conversations/chat persistence and ordinary publication cannot.
 
 ### Conversations, retry reservations and final release
 
@@ -640,7 +640,7 @@ This is the only optional cross-slice provider interface that may receive restri
 | CT-15 same-name people | A keeps distinct identity IDs | B filters IDs; C's erase confirmation targets one ID |
 | CT-16 erasure barrier | A blocks upload/association/chat publication | C keeps unsent input only in memory and shows retry |
 | CT-17 staged restart | A durably saves/reloads the exact authorized batch | B resumes index work without regenerating checkpointed model outputs; obsolete checkpoints are rejected |
-| CT-18 record timeline | A returns only current active records with L1/L2 discovery summaries and dependency-backed source links | C renders a project-scoped chronological timeline; summaries are labeled as discovery context, not reviewed claims |
+| CT-18 record timeline | A returns only current active records with L1/L2 discovery summaries and current canonical processed-content links, preferring a valid summary dependency span | C renders a project-scoped chronological timeline; summaries are labeled as unreviewed AI-generated discovery context, not reviewed claims |
 
 Protocol conformance cases run against real producers and consumer substitutes using adapter factories. Source/record/model quality is tested in the owning slice; the whole pipeline is still verified through G1-G4. Any unresolved signature/type/state decision blocks G0 readiness and must be added here rather than invented independently.
 

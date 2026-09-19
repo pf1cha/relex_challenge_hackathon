@@ -199,7 +199,7 @@ function timelineTimeLabel(time:Models["SourceTime"]){
 }
 function timelineView(records:TimelineRecord[]){
  const section=el("section","","timeline-section");section.dataset.timeline="true";section.setAttribute("aria-labelledby","timeline-title");
- const header=el("div","","timeline-header"),title=el("div");const heading=el("h3","Record timeline");heading.id="timeline-title";title.append(heading,el("p",records.length+" processed record"+(records.length===1?"":"s"),"muted"));
+ const header=el("div","","timeline-header"),title=el("div");const heading=el("h3","Record timeline");heading.id="timeline-title";title.append(heading,el("p",records.length+" processed record"+(records.length===1?"":"s"),"muted"),el("p","AI-generated discovery context. Open processed content to inspect the source.","muted timeline-context"));
  const controls=el("div","","timeline-controls"),viewport=el("div","","timeline-viewport"),track=el("ol","","timeline-track");viewport.tabIndex=0;viewport.setAttribute("aria-label","Project records timeline");viewport.append(track);
  const range=el("input");range.type="range";range.min="70";range.max="160";range.step="10";range.value="100";range.setAttribute("aria-label","Timeline zoom");
  const zoomLabel=el("output","100%","timeline-zoom-value");zoomLabel.htmlFor=range.id="timeline-zoom";

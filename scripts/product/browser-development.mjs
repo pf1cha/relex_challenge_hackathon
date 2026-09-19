@@ -10,6 +10,7 @@ try{
  await page.getByRole("link",{name:"Overview",exact:true}).click();
  const timeline=page.locator("[data-timeline]");
  await timeline.waitFor({timeout:3000});
+ await timeline.getByText("AI-generated discovery context. Open processed content to inspect the source.",{exact:true}).waitFor();
  assert.equal(await timeline.locator(".timeline-item[data-record-type]").count(),4);
  await page.getByText("A short fixture description.",{exact:true}).first().waitFor();
  await page.getByText("A fuller fixture summary.",{exact:true}).first().waitFor();

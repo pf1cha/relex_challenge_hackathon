@@ -117,7 +117,7 @@ Deleting a document or erasing a person requires a browser confirmation naming t
 
 The browser discovers jobs again after reload through the paginated admin job list. Pending/running/failed are distinct from completed. Show safe error codes and retry only when `retryable=true`. While `write_barrier=true`, show why uploads/identity/chat writes are temporarily unavailable; preserve unsent question text only in memory.
 
-`Overview.state=ready` exposes only reviewed claims/receipts; pending/failed/unavailable exposes empty arrays. The separate timeline exposes explicitly labeled L1/L2 discovery summaries for current active records, never as reviewed claims, and links each record to processed canonical content at a summary dependency span. Project status is eligible counts plus explicitly labeled operational status. Broader aggregate visualization content remains deferred.
+`Overview.state=ready` exposes only reviewed claims/receipts; pending/failed/unavailable exposes empty arrays. The separate timeline exposes explicitly labeled, unreviewed AI-generated L1/L2 discovery summaries for current active records, never as reviewed claims, and links each record to its current processed canonical content. The navigation link prefers a valid summary dependency span and otherwise uses the first current canonical span; it is not a claim receipt. Project status is eligible counts plus explicitly labeled operational status. Broader aggregate visualization content remains deferred.
 
 ## 6. Browser fixture scenarios
 
@@ -138,7 +138,7 @@ C's test composition injects fixture services into the real `create_app`. Scenar
 | erasure-failure-retry | failed job, then resumed job | Correct target, failure and final completion state |
 | project-switch | Delayed response from previous project | Response discarded and project state cleared |
 | overview-pending | Empty claims with pending state | No overview summary; the independently authorized record timeline may remain visible |
-| record-timeline | Four active records with distinct types, source times and L1/L2 summaries | Chronological horizontal cards, type colors, dependency-backed source links, scrolling and time-scale zoom |
+| record-timeline | Four active records with distinct types, source times and L1/L2 summaries | Chronological horizontal cards, type colors, current processed-content links, scrolling and time-scale zoom |
 | no-memberships | Empty project list | App accessible; no project-derived data |
 
 Fixtures assist C's development only and do not verify product behavior. Real auth/SQL, live model/index services and the actual combined browser flows are required for acceptance.
