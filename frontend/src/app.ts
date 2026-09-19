@@ -9,6 +9,7 @@ let me:Me|null=null, projects:Project[]=[], project:Project|null=null, view="doc
 let conversation:string|null=null, pending:{question:string;conversation_id:string;request_id:string}|null=null;
 let questionDraft="", epoch=0, poll:number|undefined;
 const pageNames=["documents","search","chat","overview","visualization","administration"] as const;
+const workspaceStorageKey="relex.activeProject";
 const pageLabels:Record<string,string>={documents:"Documents",search:"Evidence search",chat:"AI chat",overview:"Overview",visualization:"Project status",administration:"Administration"};
 const pageDescriptions:Record<string,string>={
  documents:"Browse the source material available to this workspace.",
@@ -22,9 +23,11 @@ function el<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string,cls?:strin
  const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;
 }
 function button(text:string, action:()=>unknown, cls=""){const n=el("button",text,cls);n.onclick=()=>{Promise.resolve(action()).catch(showError)};return n;}
-function pagePath(name:string,projectId=project?.id){return projectId?"/#/projects/"+encodeURIComponent(projectId)+"/"+name:"/";}
+function pagePath(name:string){return "/"+name;}
 function navigate(name:string){view=name;history.pushState({view:name},"",pagePath(name));render();}
-function routeView(projectId:string){const match=location.hash.match(/^#\/projects\/([^/]+)\/([^/]+)$/);if(!match||decodeURIComponent(match[1])!==projectId)return "documents";return pageNames.includes(match[2] as typeof pageNames[number])?match[2]:"documents";}
+function routeView(projectId:string){const clean=location.pathname.match(/^\/([^/]+)\/?$/)?.[1];if(clean&&pageNames.includes(clean as typeof pageNames[number]))return clean;
+ const legacy=location.hash.match(/^#\/projects\/([^/]+)\/([^/]+)$/);if(!legacy||decodeURIComponent(legacy[1])!==projectId)return "documents";return pageNames.includes(legacy[2] as typeof pageNames[number])?legacy[2]:"documents";}
+function rememberProject(id:string|null){if(id)sessionStorage.setItem(workspaceStorageKey,id);else sessionStorage.removeItem(workspaceStorageKey);}
 function pageLink(name:string,selected:boolean){const link=el("a",pageLabels[name]||name,selected?"selected":"");link.href=pagePath(name);if(selected)link.setAttribute("aria-current","page");link.dataset.view=name;link.onclick=event=>{if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate(name);};return link;}
 function input(label:string,type="text",value=""){const n=el("input");n.type=type;n.value=value;n.setAttribute("aria-label",label);n.placeholder=label;return n;}
 function select(label:string, values:[string,string][], value=""){const n=el("select");n.setAttribute("aria-label",label);for(const [v,t]of values){const o=el("option",t);o.value=v;n.append(o);}if(values.some(([v])=>v===value))n.value=value;return n;}
@@ -52,13 +55,13 @@ function reset(){epoch++;clearProject();conversation=null;pending=null;questionD
 function render(skipView=false){
  root.className="app-shell";root.replaceChildren();const top=el("header","","app-header");
  const brand=el("div","","brand");brand.append(el("span","R","brand-mark"));const brandCopy=el("div","","brand-copy");brandCopy.append(el("h1","Relex Evidence"),el("p","Verifiable project knowledge","brand-tagline"));brand.append(brandCopy);top.append(brand);
- if(me){const account=el("div","","account");const avatar=el("span",me.display_name.trim().slice(0,1).toUpperCase(),"account-avatar");const accountCopy=el("span","","account-copy");accountCopy.append(el("strong",me.display_name,"account-name"),el("small","Signed in","account-status"));account.append(avatar,accountCopy);account.append(button("Sign out",async()=>{try{await api("/api/logout","POST");}finally{reset();clearSession();me=null;projects=[];project=null;render();}},"button-quiet"));top.append(account);}
+ if(me){const account=el("div","","account");const avatar=el("span",me.display_name.trim().slice(0,1).toUpperCase(),"account-avatar");const accountCopy=el("span","","account-copy");accountCopy.append(el("strong",me.display_name,"account-name"),el("small","Signed in","account-status"));account.append(avatar,accountCopy);account.append(button("Sign out",async()=>{try{await api("/api/logout","POST");}finally{reset();clearSession();rememberProject(null);me=null;projects=[];project=null;history.replaceState({},"","/");render();}},"button-quiet"));top.append(account);}
  root.append(top);const notice=el("div");notice.id="notice";notice.setAttribute("role","alert");const barrier=el("div");barrier.id="barrier";barrier.setAttribute("role","status");
  if(!me){root.append(notice,barrier);login();return;}
  const layout=el("div","","app-layout"),sidebar=el("aside","","sidebar"),stage=el("div","","app-stage");
  const workspace=el("section","","workspace-bar");const workspaceLabel=el("div","","workspace-label");workspaceLabel.append(el("span","CURRENT WORKSPACE","eyebrow"),el("strong",project?.name||"Choose a workspace"));workspace.append(workspaceLabel);
  const picker=select("Project",projects.map(p=>[p.id,p.name+" · "+p.role]),project?.id||"");picker.className="project-select";
- picker.onchange=()=>{reset();project=projects.find(p=>p.id===picker.value)||null;view="documents";history.pushState({view},"",pagePath(view,project?.id));render();};
+ picker.onchange=()=>{reset();project=projects.find(p=>p.id===picker.value)||null;rememberProject(project?.id||null);view="documents";history.pushState({view},"",pagePath(view));render();};
  workspace.append(field("Switch workspace",picker));sidebar.append(workspace);
  if(!project){stage.append(notice,barrier,emptyState("No workspace access","Ask an administrator to grant access for account "+me.user_id+"."));layout.append(sidebar,stage);root.append(layout);return;}
  const nav=el("nav","","primary-nav");nav.setAttribute("aria-label","Primary navigation");
@@ -86,8 +89,10 @@ function login(){
 }
 async function loadProjects(){projects=await list<Project>("/api/projects");const source=location.pathname.match(/^\/projects\/([^/]+)\/sources\/([^/]+)$/);
  const routeProject=location.hash.match(/^#\/projects\/([^/]+)(?:\/|$)/);
- project=(source?projects.find(p=>p.id===decodeURIComponent(source[1])):routeProject?projects.find(p=>p.id===decodeURIComponent(routeProject[1])):projects[0])||null;
- if(project&&!source){view=routeView(project.id);if(view==="administration"&&project.role!=="admin")view="documents";}render(!!source);
+ const remembered=sessionStorage.getItem(workspaceStorageKey);
+ project=(source?projects.find(p=>p.id===decodeURIComponent(source[1])):routeProject?projects.find(p=>p.id===decodeURIComponent(routeProject[1])):projects.find(p=>p.id===remembered)||projects[0])||null;
+ rememberProject(project?.id||null);
+ if(project&&!source){view=routeView(project.id);if(view==="administration"&&project.role!=="admin")view="documents";history.replaceState({view},"",pagePath(view));}render(!!source);
  if(source){if(!project){showError(new Error("This project is unavailable."));return;}const query=new URLSearchParams(location.search);
  await sourceView(decodeURIComponent(source[2]),Number(query.get("version")),query.get("span")||"");}}
 async function renderView(){if(poll){clearInterval(poll);poll=undefined;}document.querySelector("#receipt")?.remove();const main=root.querySelector<HTMLElement>("#content");if(!main)return;const mark=++epoch;main.replaceChildren(el("p","Loading…"));
@@ -133,7 +138,7 @@ async function sourceView(id:string,version:number,span:string,cursor?:string){c
  if(page.previous_cursor)main.append(button("Previous source page",()=>sourceView(id,version,span,page.previous_cursor!)));
  if(page.next_cursor)main.append(button("Next source page",()=>sourceView(id,version,span,page.next_cursor!)));
  main.querySelector("mark")?.scrollIntoView({block:"center"});
- }catch(e){if(e instanceof DOMException&&e.name==="AbortError")return;showError(e,main);main.append(button("Return to chat and regenerate",()=>{view="chat";renderView();}));}}
+ }catch(e){if(e instanceof DOMException&&e.name==="AbortError")return;showError(e,main);main.append(button("Return to chat and regenerate",()=>navigate("chat")));}}
 async function search(main:HTMLElement,mark:number){const options=await api<Models["FilterOptions"]>(base()+"/filters");current(mark);main.replaceChildren(pageHeader("Search evidence",pageDescriptions.search,"Discovery"));
  const form=el("form","","search-form"),q=input("Search query"),from=input("From date","date"),to=input("To date","date");q.maxLength=8000;q.className="search-query";
  const type=select("Record type",[["","Any type"],...options.record_types.map(x=>[x,x] as [string,string])]);
