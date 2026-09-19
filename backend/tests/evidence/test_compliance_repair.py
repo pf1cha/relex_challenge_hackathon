@@ -6,7 +6,7 @@ import pytest
 
 from app.contracts.errors import DomainError
 from app.evidence.parsing import parse
-from app.evidence.privacy import PrivacyAgent
+from app.evidence.privacy import PrivacyAgent, validate_sanitized
 
 
 class CorrectingProvider:
@@ -72,6 +72,24 @@ class UneditedContactProvider:
         }
 
 
+class SystemCodeProvider:
+    settings = SimpleNamespace(model="privacy-test")
+
+    async def generate(self, role, system, payload, **kwargs):
+        span = payload["spans"][0]
+        value = "OP_ID SYS-447"
+        start = span["text"].index(value)
+        return {
+            "complete": True,
+            "covered_span_ids": [span["span_id"]],
+            "entities": [{"span_id": span["span_id"], "start": start, "end": start + len(value),
+                          "expected_text": value, "kind": "personal_identifier", "identity_hint": None,
+                          "evidence_span_ids": [span["span_id"]], "confidence": "certain"}],
+            "edits": [],
+            "unresolved_reasons": [],
+        }
+
+
 def test_corpus_parser_is_lossless_and_preserves_known_boundaries():
     root = Path(__file__).resolve().parents[3] / "corpus" / "acme"
     files = sorted(root.glob("*/*.txt"))
@@ -127,3 +145,23 @@ async def test_privacy_rejects_contact_entity_without_source_bound_edit():
             hashlib.sha256(text.encode()).hexdigest())
     assert failure.value.code == "privacy_unresolved"
     assert provider.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_system_code_exemption_is_exact_and_other_personal_id_still_fails():
+    text = "System OP_ID SYS-447."
+    source_hash = hashlib.sha256(text.encode()).hexdigest()
+    start = text.index("OP_ID SYS-447")
+    resolution = {
+        "diagnostic_id": "diagnostic", "record_id": "record", "record_version": 1,
+        "source_hash": source_hash, "span_id": "s1", "start": start,
+        "end": start + len("OP_ID SYS-447"), "expected_text": "OP_ID SYS-447",
+        "kind": "personal_identifier", "reason": "system identifier", "decision": "system_code",
+    }
+    plan = await PrivacyAgent(SystemCodeProvider()).plan(
+        "project", "record", 1, [{"span_id": "s1", "text": text}], source_hash,
+        resolutions=[resolution])
+    raw = plan.model_dump(mode="json")
+    validate_sanitized(raw, {"s1": "System OP_ID SYS-447."}, [resolution])
+    with pytest.raises(ValueError, match="direct_identifier_survived"):
+        validate_sanitized(raw, {"s1": "System OP_ID SYS-447; operator OP_ID PERSON-9."}, [resolution])

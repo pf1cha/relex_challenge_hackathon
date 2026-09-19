@@ -327,7 +327,11 @@ class Jobs:
                         title=title[:edit["start"]]+edit["replacement"]+title[edit["end"]:]
                     sanitized={span["span_id"]:r["spans"][span["ordinal"]]["text"] for span in r["raw_spans"]}
                     sanitized[title_id]=title
-                    try:validate_sanitized(plan,sanitized)
+                    resolutions=[value for value in s.get("privacy_resolutions",{}).values()
+                                 if value["record_id"]==r["record_id"] and
+                                 value["record_version"]==r["record_version"] and
+                                 value.get("source_hash")==r["source_hash"]]
+                    try:validate_sanitized(plan,sanitized,resolutions)
                     except ValueError:raise DomainError("privacy_unresolved") from None
                     r["title"]=title;r["person_ids"]=sorted(ids);r["quarantined"]=bool(plan["unresolved_reasons"])
                     s["documents"][r["original_doc_id"]]["title"]=r["title"]

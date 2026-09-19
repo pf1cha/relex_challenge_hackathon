@@ -272,20 +272,44 @@ class PrivacyAgent:
             covered_span_ids=covered,unresolved_reasons=sorted(set(all_reasons)),complete=len(covered)==len(spans))
 
 
-def validate_sanitized(plan, sanitized_by_id):
+def validate_sanitized(plan, sanitized_by_id, resolutions=()):
     """Reject direct identifiers that survived the application-owned edit map."""
     edits={(value["span_id"],value["start"],value["end"],value["expected_text"]):value
            for value in plan["edits"]}
+    exemptions={};exempt_entities=set()
+    entities={(value["span_id"],value["start"],value["end"],value["expected_text"]):value
+              for value in plan["entities"]}
+    for resolution in resolutions:
+        key=(resolution.get("span_id"),resolution.get("start"),resolution.get("end"),
+             resolution.get("expected_text"))
+        entity=entities.get(key)
+        if (resolution.get("decision")!="system_code" or
+                resolution.get("record_id")!=plan["record_id"] or
+                resolution.get("record_version")!=plan["record_version"] or
+                resolution.get("source_hash")!=plan["source_hash"] or
+                not entity or entity["kind"]!="personal_identifier"):
+            continue
+        shift=sum(len(edit["replacement"])-(edit["end"]-edit["start"])
+                  for edit in plan["edits"] if edit["span_id"]==key[0] and edit["end"]<=key[1])
+        final_key=(key[1]+shift,key[2]+shift,key[3])
+        text=sanitized_by_id.get(key[0],"")
+        if text[final_key[0]:final_key[1]]==final_key[2]:
+            exemptions.setdefault(key[0],set()).add(final_key)
+            exempt_entities.add(key)
     for entity in plan["entities"]:
         if entity["kind"] not in ("person","contact","personal_identifier") or entity["confidence"]=="uncertain":
             continue
         key=(entity["span_id"],entity["start"],entity["end"],entity["expected_text"])
+        if entity["kind"]=="personal_identifier" and key in exempt_entities:
+            continue
         edit=edits.get(key)
         if edit is None:raise ValueError("protected_entity_without_edit")
         text=sanitized_by_id[entity["span_id"]]
         start=edit.get("sanitized_start");end=edit.get("sanitized_end")
         if type(start) is not int or type(end) is not int or text[start:end]!=edit["replacement"] or edit["replacement"]==edit["expected_text"]:
             raise ValueError("sanitized_mapping_mismatch")
-    for text in sanitized_by_id.values():
-        if EMAIL.search(text) or PHONE.search(text) or PrivacyAgent._personal_id.search(text):
-            raise ValueError("direct_identifier_survived")
+    for span_id,text in sanitized_by_id.items():
+        if EMAIL.search(text) or PHONE.search(text):raise ValueError("direct_identifier_survived")
+        for match in PrivacyAgent._personal_id.finditer(text):
+            if (match.start(),match.end(),match.group()) not in exemptions.get(span_id,set()):
+                raise ValueError("direct_identifier_survived")
