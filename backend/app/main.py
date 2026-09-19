@@ -13,7 +13,7 @@ from app.config import HttpSettings
 from app.contracts.models import *
 from app.contracts.ports import Services
 from app.contracts.errors import DomainError
-from app.api.schemas import LoginInput, RegisterInput, ConversationInput, MemberInput, SearchBody, PrivacyResolutionInput, ProjectTypeInput
+from app.api.schemas import LoginInput, RegisterInput, ConversationInput, MemberInput, SearchBody, PrivacyResolutionInput, ProjectTypeInput, ProjectInput
 from app.api.errors import error_response
 
 def create_app(services: Services, settings: HttpSettings) -> FastAPI:
@@ -129,7 +129,14 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
     @app.get("/api/projects", response_model=Page[Project])
     async def projects(who=Depends(principal), paging=Depends(page)):
         return await services.projects.list_projects(who,paging)
+    @app.post("/api/projects", response_model=Project, status_code=201, dependencies=[Depends(no_query)])
+    async def create_project(body: ProjectInput, who=Depends(principal)):
+        return await services.projects.create_project(who, body.name)
     base="/api/projects/{p}"
+    @app.delete(base, status_code=204, dependencies=no_input)
+    async def delete_project(ctx=Depends(admin)):
+        await services.projects.delete_project(ctx)
+        return Response(status_code=204)
     @app.get(base+"/types", response_model=Page[ProjectType])
     async def project_types(ctx=Depends(context), paging=Depends(page)):
         return await services.projects.list_project_types(ctx)

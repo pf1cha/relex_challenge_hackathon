@@ -1,6 +1,6 @@
 """HTTP-only input shapes. Evidence and response types come from contracts."""
 from typing import Annotated
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from app.contracts.models import DTO, Id, Role, SearchFilters, PageRequest
 
 class LoginInput(DTO):
@@ -38,6 +38,14 @@ class PrivacyResolutionInput(DTO):
 
 class ProjectTypeInput(DTO):
     name: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9 _-]*$")]
+
+class ProjectInput(DTO):
+    name: Annotated[str, Field(min_length=1, max_length=120)]
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 class ProjectTypeInput(DTO):
     name: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9 _-]*$")]

@@ -44,3 +44,32 @@ async def test_timeline_route_is_project_authorized():
         assert timeline.status_code==200
         assert timeline.json()["items"][0]["level2_summary"]=="A fuller fixture summary."
         assert (await client.get("/api/projects/another-project/timeline")).status_code==404
+
+
+@pytest.mark.asyncio
+async def test_admin_can_create_project_with_csrf_and_valid_name():
+    fixture=FixtureServices()
+    app=create_app(fixture.services(),HttpSettings(secure_cookie=False,allow_loopback_http=True))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://127.0.0.1:18080") as client:
+        headers={"Origin":"http://127.0.0.1:18080"}
+        login=await client.post("/api/login",json={"email":"fixture@synthetic.invalid","password":"synthetic-password"},headers=headers)
+        headers["X-CSRF-Token"]=login.json()["csrf_token"]
+
+        created=await client.post("/api/projects",json={"name":"  New workspace  "},headers=headers)
+
+        assert created.status_code==201
+        assert created.json()=={"id":"created-project","name":"New workspace","role":"admin"}
+        assert (await client.post("/api/projects",json={"name":"   "},headers=headers)).status_code==422
+        assert (await client.post("/api/projects",json={"name":"No CSRF"})).status_code==403
+
+
+@pytest.mark.asyncio
+async def test_admin_can_delete_project_with_csrf():
+    fixture=FixtureServices()
+    app=create_app(fixture.services(),HttpSettings(secure_cookie=False,allow_loopback_http=True))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://127.0.0.1:18080") as client:
+        headers={"Origin":"http://127.0.0.1:18080"}
+        login=await client.post("/api/login",json={"email":"fixture@synthetic.invalid","password":"synthetic-password"},headers=headers)
+        headers["X-CSRF-Token"]=login.json()["csrf_token"]
+        deleted=await client.delete("/api/projects/fixture-project",headers=headers)
+        assert deleted.status_code==204 and fixture.calls==["delete_project"]

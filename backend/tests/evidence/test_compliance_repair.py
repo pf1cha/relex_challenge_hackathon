@@ -20,12 +20,9 @@ class CorrectingProvider:
         schema = kwargs["json_schema"]
         entity = schema["schema"]["properties"]["entities"]["items"]
         assert schema["strict"] is True
-        assert "confidence" in entity["required"]
+        assert set(entity["required"]) == {"span_id", "kind", "expected_text"}
         assert entity["properties"]["kind"]["enum"] == [
-            "person", "organization", "role", "contact", "personal_identifier",
-            "contextual_circumstance", "uncertain"]
-        if self.calls == 1:
-            return {"complete": False, "covered_span_ids": [], "entities": [], "unresolved_reasons": []}
+            "person", "contact", "personal_identifier"]
         span = payload["spans"][0]
         name = "Åsa Öberg"
         personal_id = "OP_ID 447102"
@@ -35,10 +32,8 @@ class CorrectingProvider:
             "complete": True,
             "covered_span_ids": [span["span_id"]],
             "entities": [
-                {"span_id": span["span_id"], "start": a, "end": a + len(name), "expected_text": name,
-                 "kind": "person", "identity_hint": "NEW_1", "evidence_span_ids": [span["span_id"]], "confidence": "certain"},
-                {"span_id": span["span_id"], "start": b, "end": b + len(personal_id), "expected_text": personal_id,
-                 "kind": "personal_identifier", "identity_hint": "NEW_1", "evidence_span_ids": [span["span_id"]], "confidence": "certain"},
+                {"span_id": span["span_id"], "expected_text": name, "kind": "person"},
+                {"span_id": span["span_id"], "expected_text": personal_id, "kind": "personal_identifier"},
             ],
             "unresolved_reasons": [],
         }
@@ -117,33 +112,29 @@ def test_transcript_disclaimer_is_not_a_turn():
 
 
 @pytest.mark.asyncio
-async def test_privacy_plan_uses_one_correction_and_unicode_codepoint_ranges():
+async def test_privacy_plan_derives_unicode_codepoint_ranges():
     text = "Åsa Öberg owns OP_ID 447102 until November."
     provider = CorrectingProvider()
     plan = await PrivacyAgent(provider).plan("project", "record", 1, [{"span_id": "s1", "text": text}],
         hashlib.sha256(text.encode()).hexdigest())
-    assert provider.calls == 2
-    assert plan.corrections_used == 1
+    assert provider.calls == 1
+    assert plan.corrections_used == 0
     assert plan.entities[0].expected_text == "Åsa Öberg"
     assert text[plan.entities[0].start:plan.entities[0].end] == "Åsa Öberg"
 
 
-def test_privacy_canonicalizes_only_unique_exact_expected_text_offsets():
-    spans = [{"span_id": "s1", "text": "Call +358 40 123 4567 now."}]
-    result = {
-        "entities": [{"span_id": "s1", "start": 5, "end": 12,
-                      "expected_text": "+358 40 123 4567"}],
-        "edits": [],
-    }
-    fixed = PrivacyAgent._canonicalize_unique_offsets(result, spans)
-    assert fixed["entities"][0]["start"] == 5
-    assert fixed["entities"][0]["end"] == 21
+def test_privacy_derives_offsets_from_unique_expected_text_and_ignores_model_ranges():
+    spans = [{"span_id": "s1", "text": "IT Integration Lead"}]
+    result = {"entities": [{"span_id": "s1", "start": 0, "end": 21,
+                            "expected_text": "IT Integration Lead"}], "edits": []}
+    fixed = PrivacyAgent._resolve_entity_offsets(result, spans)
+    assert fixed["entities"][0]["start"] == 0
+    assert fixed["entities"][0]["end"] == 19
 
     repeated = [{"span_id": "s1", "text": "Alex met Alex."}]
-    ambiguous = {"entities": [{"span_id": "s1", "start": 1, "end": 2,
+    ambiguous = {"entities": [{"span_id": "s1", "start": 0, "end": 4,
                                 "expected_text": "Alex"}]}
-    unchanged = PrivacyAgent._canonicalize_unique_offsets(ambiguous, repeated)
-    assert (unchanged["entities"][0]["start"], unchanged["entities"][0]["end"]) == (1, 2)
+    assert PrivacyAgent._resolve_entity_offsets(ambiguous, repeated)["entities"] == []
 
 
 @pytest.mark.asyncio

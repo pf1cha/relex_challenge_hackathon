@@ -95,32 +95,26 @@ def person_occurs(record, person_id, people):
 
 class PrivacyAgent:
     """Mandatory bounded semantic classification with deterministic validation."""
-    policy_version = "privacy-r3"
-    prompt_version = "privacy-plan-v4-local-structured"
-    max_batch_codepoints = 24000
+    policy_version = "privacy-r4-pii-only"
+    prompt_version = "privacy-plan-v7-minimal-pii"
+    max_batch_codepoints = 2000
     response_schema = {
         "name": "privacy_plan_batch", "strict": True,
         "schema": {
             "type": "object",
             "properties": {
-                "complete": {"type": "boolean"},
                 "entities": {"type": "array", "items": {
                     "type": "object",
                     "properties": {
-                        "span_id": {"type": "string"}, "start": {"type": "integer"},
-                        "end": {"type": "integer"},
-                        "kind": {"type": "string", "enum": ["person", "organization", "role", "contact", "personal_identifier", "contextual_circumstance", "uncertain"]},
-                        "identity_hint": {"type": ["string", "null"]},
-                        "evidence_span_ids": {"type": "array", "items": {"type": "string"}},
+                        "span_id": {"type": "string"},
+                        "kind": {"type": "string", "enum": ["person", "contact", "personal_identifier"]},
                         "expected_text": {"type": "string"},
-                        "confidence": {"type": "string", "enum": ["certain", "uncertain"]},
                     },
-                    "required": ["span_id", "start", "end", "kind", "identity_hint", "evidence_span_ids", "expected_text", "confidence"],
+                    "required": ["span_id", "kind", "expected_text"],
                     "additionalProperties": False,
                 }},
-                "unresolved_reasons": {"type": "array", "items": {"type": "string"}},
             },
-            "required": ["complete", "entities", "unresolved_reasons"],
+            "required": ["entities"],
             "additionalProperties": False,
         },
     }
@@ -148,19 +142,27 @@ class PrivacyAgent:
                    (kinds is None or item.kind in kinds) for item in ranges)
 
     @staticmethod
-    def _canonicalize_unique_offsets(result, spans):
-        """Repair model offsets only when expected text occurs exactly once."""
+    def _resolve_entity_offsets(result, spans):
+        """Derive ranges from source text; discard entities with no source occurrence."""
         by_id={span["span_id"]:span["text"] for span in spans}
+        resolved=[]
         for item in result.get("entities",[]):
             text=by_id.get(item.get("span_id"));expected=item.get("expected_text")
-            if not isinstance(text,str) or not isinstance(expected,str) or not expected:
-                continue
-            start=item.get("start");end=item.get("end")
-            if type(start) is int and type(end) is int and text[start:end]==expected:
-                continue
-            matches=[match.start() for match in re.finditer(re.escape(expected),text)]
-            if len(matches)==1:
-                item["start"]=matches[0];item["end"]=matches[0]+len(expected)
+            matches=[match.start() for match in re.finditer(re.escape(expected),text)] if isinstance(text,str) and isinstance(expected,str) and expected else []
+            if len(matches)!=1:
+                candidates=[(span_id,value) for span_id,value in by_id.items() if isinstance(expected,str) and expected and value.count(expected)==1]
+                if len(candidates)!=1:
+                    continue
+                item["span_id"],text=candidates[0]
+                matches=[match.start() for match in re.finditer(re.escape(expected),text)]
+            item.pop("start",None);item.pop("end",None)
+            item["start"]=matches[0];item["end"]=matches[0]+len(expected)
+            item["evidence_span_ids"]=[item["span_id"]]
+            item["identity_hint"]=("NEW_"+hashlib.sha256(expected.casefold().encode()).hexdigest()[:12]
+                                   if item.get("kind")=="person" else None)
+            item["confidence"]="certain"
+            resolved.append(item)
+        result["entities"]=resolved
         return result
 
     @classmethod
@@ -186,20 +188,60 @@ class PrivacyAgent:
         return result
 
     @staticmethod
+    def _enforce_known_people(result, spans, people):
+        entities=result.setdefault("entities",[])
+        for person_id,person in (people or {}).items():
+            if person.get("state")=="erased":
+                continue
+            for alias in [person.get("display_name"), *[value.get("value") for value in person.get("contacts",[])]]:
+                if not alias:
+                    continue
+                pattern=re.compile(r"(?<!\w)"+re.escape(alias)+r"(?!\w)",re.I)
+                for span in spans:
+                    for match in pattern.finditer(span["text"]):
+                        entities.append({"span_id":span["span_id"],"start":match.start(),"end":match.end(),
+                            "kind":"person","identity_hint":person_id,"evidence_span_ids":[span["span_id"]],
+                            "expected_text":match.group(),"confidence":"certain"})
+        return result
+
+    @staticmethod
+    def _make_protective_entities_certain(result):
+        for entity in result.get("entities",[]):
+            if entity.get("kind") in {"contact","personal_identifier"}:
+                entity["confidence"]="certain"
+        return result
+
+    @staticmethod
+    def _dedupe_entities(result):
+        unique={}
+        for entity in result.get("entities",[]):
+            key=(entity.get("span_id"),entity.get("start"),entity.get("end"),entity.get("expected_text"))
+            prior=unique.get(key)
+            if prior is None or (prior.get("confidence")!="certain" and entity.get("confidence")=="certain"):
+                unique[key]=entity
+        result["entities"]=list(unique.values())
+        return result
+
+    @staticmethod
     def _bind_known_identities(entities, people):
         aliases={}
+        first_names={}
         for person_id, person in (people or {}).items():
             if person.get("state")=="erased":
                 continue
-            for alias in [person.get("display_name"),
-                          *[contact.get("value") for contact in person.get("contacts",[])]]:
+            display_name=person.get("display_name")
+            for alias in [display_name, *[contact.get("value") for contact in person.get("contacts",[])]]:
                 if alias:
                     aliases.setdefault(alias.casefold(),set()).add(person_id)
+            if display_name and len(display_name.split())>1:
+                first_names.setdefault(display_name.split()[0].casefold(),set()).add(person_id)
         for entity in entities:
             if entity.get("kind")=="person":
-                matches=aliases.get(entity.get("expected_text","").casefold(),set())
+                value=entity.get("expected_text","").casefold()
+                matches=aliases.get(value,set()) or first_names.get(value,set())
                 if len(matches)==1:
                     entity["identity_hint"]=next(iter(matches))
+                    entity["confidence"]="certain"
         return entities
 
     @staticmethod
@@ -222,8 +264,6 @@ class PrivacyAgent:
                 reason,replacement="contact","[contact removed]"
             elif entity.kind=="personal_identifier":
                 reason,replacement="personal_identifier","[personal identifier removed]"
-            elif entity.kind=="contextual_circumstance":
-                reason,replacement="private_cause","[private cause removed]"
             else:
                 continue
             edits.append(PrivacyEdit(span_id=entity.span_id,start=entity.start,end=entity.end,
@@ -231,17 +271,16 @@ class PrivacyAgent:
         return edits
 
     def _validate_batch(self, result, spans, resolutions=(), people=None):
-        result=self._canonicalize_unique_offsets(result,spans)
+        result=self._resolve_entity_offsets(result,spans)
         result=self._enforce_deterministic_entities(result,spans)
+        result=self._enforce_known_people(result,spans,people)
+        result=self._make_protective_entities_certain(result)
+        result=self._dedupe_entities(result)
         by_id={span["span_id"]:span for span in spans}
-        if result.get("complete") is not True:
-            raise ValueError("incomplete_coverage")
         entities_raw=self._bind_known_identities(result.get("entities",[]),people)
         entities=[PrivacyEntity.model_validate(value) for value in entities_raw]
         edits=self._compile_edits(entities,resolutions)
-        reasons=result.get("unresolved_reasons",[])
-        if not isinstance(reasons,list) or any(not isinstance(value,str) or not value or len(value)>500 for value in reasons):
-            raise ValueError("invalid_unresolved_reason")
+        reasons=[]
         occupied={}
         for item in [*entities,*edits]:
             span=by_id.get(item.span_id)
@@ -254,10 +293,9 @@ class PrivacyAgent:
         for edit in sorted(edits,key=lambda value:(value.span_id,value.start,value.end)):
             if edit.span_id in occupied and edit.start < occupied[edit.span_id]:raise ValueError("overlapping_edits")
             occupied[edit.span_id]=edit.end
-            expected={"identity":{"person"},"contact":{"contact"},"private_cause":{"contextual_circumstance"},
+            expected={"identity":{"person"},"contact":{"contact"},
                       "personal_identifier":{"personal_identifier"},"contextual_risk":{"uncertain"}}[edit.reason]
             if not self._contains(entities,edit.span_id,edit.start,edit.end,expected):raise ValueError("unsupported_edit")
-            if edit.reason=="private_cause" and self._temporal.search(edit.expected_text):raise ValueError("operational_time_removed")
             if edit.reason=="contextual_risk":raise ValueError("risk_must_not_rewrite")
             if edit.replacement==edit.expected_text:raise ValueError("non_transforming_edit")
         resolution_map={(value["span_id"],value["start"],value["end"],value["expected_text"]):value
@@ -276,10 +314,8 @@ class PrivacyAgent:
                 if not permitted_non_edit and (edit is None or edit.reason!=expected_reason):
                     raise ValueError("protected_entity_without_edit")
         decision_contract={
-            "organization":("organization",None), "role":("role",None),
             "system_code":("personal_identifier",None), "contact":("contact","contact"),
             "personal_identifier":("personal_identifier","personal_identifier"),
-            "private_cause":("contextual_circumstance","private_cause"),
         }
         for key,resolution in resolution_map.items():
             entity=next((value for value in entities if
@@ -306,7 +342,7 @@ class PrivacyAgent:
     @staticmethod
     def _validate_resolutions(record_id,record_version,source_hash,spans,resolutions,people):
         by_id={span["span_id"]:span["text"] for span in spans}
-        allowed={"organization","role","system_code","contact","personal_identifier","private_cause"}
+        allowed={"system_code","contact","personal_identifier"}
         validated=[]
         for value in resolutions or []:
             decision=value.get("decision","")
@@ -327,18 +363,12 @@ class PrivacyAgent:
 
     async def _generate(self, payload, prior=None, error=None):
         system=(
-            "You are the mandatory privacy classifier. Inspect every supplied span, including clean-looking spans. "
-            "Return one JSON object with complete=true, entities, and unresolved_reasons. "
-            "Every entity/edit must use Python Unicode code-point start/end offsets and exact expected_text. Entity kinds: "
-            "person, organization, role, contact, personal_identifier, contextual_circumstance, uncertain. "
-            "Use evidence_span_ids and a record-local NEW_* identity_hint for supported new people; use a supplied PERSON_* only "
-            "when evidence supports that binding. An exact supplied alias match supports binding to that PERSON_* unless conflicting "
-            "supplied identities share the alias; relationship uncertainty is irrelevant to identity binding. Keep organizations and roles "
-            "distinct from people. Flag singling-out context without generalizing it. For every certain person, contact, or personal_identifier "
-            "entity, emit an edit over the exact same span and expected_text: identity for person, contact for contact, personal_identifier for "
-            "personal_identifier. Every expected_text must be copied verbatim from the supplied span; never invent redacted source text. "
-            "An edit may remove only a private cause, never an operational date/location/role, and must not invent prose. "
-            "Uncertainty must remain unresolved. Do not return edits; the application compiles all edits from validated entities."
+            "Find personal information in every supplied span. Return one JSON object containing only entities. "
+            "For each entity return span_id, expected_text copied verbatim from that span, and kind. "
+            "Kinds are person, contact, and personal_identifier. Contact includes email, phone, and postal address. "
+            "When PII is ambiguous, use personal_identifier. Do not emit organizations, roles, dates, business status, "
+            "private circumstances, warnings, or ordinary prose. Never invent source text. The application owns offsets, "
+            "coverage, identity binding, confidence, and edits."
         )
         request=dict(payload)
         if prior is not None:
@@ -370,13 +400,16 @@ class PrivacyAgent:
                      "spans":[{"span_id":span["span_id"],"text":span["text"]} for span in batch]}
             hashes.append(hashlib.sha256(json.dumps(payload["spans"],ensure_ascii=False,sort_keys=True).encode()).hexdigest())
             result=await self._generate(payload)
-            try:
-                entities,edits,reasons=self._validate_batch(result,batch,batch_resolutions,people)
-            except Exception as exc:
-                corrections+=1
-                result=await self._generate(payload,result,str(exc))
-                try:entities,edits,reasons=self._validate_batch(result,batch,batch_resolutions,people)
-                except Exception:raise DomainError("privacy_unresolved") from None
+            for attempt in range(4):
+                try:
+                    entities,edits,reasons=self._validate_batch(result,batch,batch_resolutions,people)
+                    break
+                except Exception as exc:
+                    if attempt == 3:
+                        raise DomainError("privacy_unresolved") from None
+                    corrections+=1
+                    result=await self._generate(payload,result,str(exc))
+            reasons=[]
             all_entities.extend(entities);all_edits.extend(edits);all_reasons.extend(reasons)
             covered.extend(span["span_id"] for span in batch)
         model=getattr(getattr(self.provider,"settings",None),"model",None) or "configured-model"

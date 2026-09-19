@@ -219,6 +219,7 @@ class Jobs:
             plans=[]
             model=getattr(getattr(agent.provider,"settings",None),"model",None) or "configured-model"
             for record,spans,saved,people,resolutions,privacy_generation in private_records:
+                lease=await self.heartbeat(lease)
                 reusable=(saved and saved.get("complete") and saved.get("source_hash")==record["source_hash"] and
                           saved.get("policy_version")==agent.policy_version and saved.get("prompt_version")==agent.prompt_version and
                           saved.get("model_version")==model and saved.get("identity_revision")==privacy_generation and
@@ -227,6 +228,7 @@ class Jobs:
                 if reusable:plans.append(PrivacyPlan.model_validate(saved))
                 else:plans.append(await agent.plan(lease.job.project_id,record["record_id"],record["record_version"],spans,
                     record["source_hash"],people,resolutions,privacy_generation))
+                lease=await self.heartbeat(lease)
 
             def persist(s,j):
                 for incoming in plans:

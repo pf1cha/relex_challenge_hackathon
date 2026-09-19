@@ -26,6 +26,10 @@ class FixtureServices:
         return RequestContext(user_id=principal.user_id,session_id=principal.session_id,project_id=project_id,role="admin",access_revision=1,corpus_generation=1,privacy_generation=0)
     async def list_projects(self,principal,page):
         return Page[Project](items=[Project(id="fixture-project",name="SYNTHETIC DEVELOPMENT FIXTURE",role="admin")],next_cursor=None)
+    async def create_project(self,principal,name):
+        return Project(id="created-project",name=name.strip(),role="admin")
+    async def delete_project(self,ctx):
+        self.calls.append("delete_project")
     async def list_documents(self,ctx,page): return Page[Document](items=[],next_cursor=None)
     async def get_status(self,ctx):
         return ProjectStatus(project_id=ctx.project_id,eligible_documents=0,eligible_records=0,operational_job_counts={},write_barrier=False,snapshot=Snapshot(corpus_generation=1,privacy_generation=0))

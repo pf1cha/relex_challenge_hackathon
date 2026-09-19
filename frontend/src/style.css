@@ -265,6 +265,17 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
 .member-access-form > .field { min-width: 0; }
 .member-access-form select, .member-access-form input { width: 100%; }
 
+.administration-page > section { margin-top: 18px; }
+.administration-page button:not(.button-danger):not(.button-secondary) { min-height: 34px; padding: 7px 11px; font-size: 12px; }
+.admin-create-project { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.admin-create-project h3 { margin: 0; }
+.admin-create-project p { margin: 5px 0 14px; }
+.create-project-form { align-items: end; margin: 0; }
+.create-project-form .field { min-width: min(340px, 100%); }
+.create-project-form input { width: 100%; }
+.create-project-form button { white-space: nowrap; }
+.admin-create-project > .button-danger { margin-top: 10px; }
+
 .auth-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); gap: clamp(44px, 7vw, 92px); align-items: center; width: min(1040px, calc(100% - 48px)); min-height: calc(100vh - 68px); margin: 0 auto; padding: 52px 0; }
 .auth-intro { max-width: 550px; }
 .auth-intro h2 { max-width: 540px; margin: 13px 0 16px; color: var(--ink); font-size: 46px; font-weight: 770; line-height: 1.08; letter-spacing: 0; }
@@ -329,6 +340,7 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .member-row { grid-template-columns: 1fr; }
   .member-row button { width: 100%; }
   .member-access-form { grid-template-columns: 1fr; }
+  .create-project-form .field, .create-project-form button { width: 100%; }
   .auth-layout { display: block; width: min(100% - 32px, 500px); padding: 38px 0; }
   .auth-intro { margin-bottom: 28px; }
   .auth-intro h2 { font-size: 36px; }

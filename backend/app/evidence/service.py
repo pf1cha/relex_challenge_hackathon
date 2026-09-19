@@ -180,6 +180,32 @@ class EvidencePlatform:
             items=[Project(id=r["id"],name=r["name"],role=r["role"]) for r in rows]
             return self._page(items,page,["projects",principal.user_id,[[r["id"],r["access_revision"]] for r in rows]])
 
+    async def create_project(self,principal,name):
+        name=name.strip()
+        require(1<=len(name)<=120,"invalid_input")
+        project_id=uid();s=fresh_state()
+        s["members"][principal.user_id]=dict(role="admin",revision=1,granted_at=iso())
+        async with self.db.connection(restricted=True) as c:
+            await self._session(c,principal)
+            admin=await (await c.execute(
+                "SELECT 1 FROM project_memberships WHERE user_id=%s AND role='admin' LIMIT 1",
+                (principal.user_id,))).fetchone()
+            require(admin,"forbidden")
+            await c.execute("INSERT INTO projects(id,name,data) VALUES(%s,%s,%s)",
+                            (project_id,name,Jsonb(s)))
+            await self.sync_relational(c,project_id,s,restricted=True)
+        return Project(id=project_id,name=name,role="admin")
+
+    async def delete_project(self,ctx):
+        async with self.db.connection(restricted=True) as c:
+            row=await (await c.execute("SELECT data FROM projects WHERE id=%s FOR UPDATE",(ctx.project_id,))).fetchone()
+            require(row,"not_found")
+            state=row["data"]
+            require(not any(state.get(key) for key in ("documents","records","people","jobs","memories","chunks","entries","history","conversations","messages","answers","plans","privacy_plans","privacy_diagnostics","privacy_resolutions")),"invalid_input")
+            for table in ("record_dependencies","receipts","job_documents","job_record_versions","index_operations","jobs","record_spans","record_versions","records","documents","memory_artifacts","source_chunks","index_entries","history_events","artifact_checkpoints","conversations","messages","chat_attempts","answers","rebuild_plans","job_capabilities","project_principals","project_access_epochs","project_memberships","project_state","restricted_document_inputs","restricted_record_inputs","restricted_identities","restricted_identity_aliases","restricted_privacy_runs","restricted_privacy_occurrences","restricted_privacy_metadata_occurrences","restricted_privacy_diagnostics","restricted_privacy_metadata_diagnostics","restricted_privacy_resolutions","erasure_tombstones"):
+                await c.execute(f"DELETE FROM {table} WHERE project_id=%s",(ctx.project_id,))
+            await c.execute("DELETE FROM projects WHERE id=%s",(ctx.project_id,))
+
     async def list_project_types(self,ctx):
         async with self.transaction(ctx) as (_,s):
             items=[ProjectType(name=name) for name in sorted(s.get("project_types", {}))]
