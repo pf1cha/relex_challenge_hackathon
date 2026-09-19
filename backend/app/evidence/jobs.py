@@ -74,9 +74,9 @@ class Jobs:
 
     async def claim(self,worker_id,kinds):
         async with self.p.db.connection() as c:
-            rows=await (await c.execute("SELECT id,data FROM projects ORDER BY created_at,id FOR UPDATE SKIP LOCKED")).fetchall()
+            rows=await (await c.execute("SELECT ps.project_id AS id FROM project_state ps JOIN projects p ON p.id=ps.project_id ORDER BY p.created_at,p.id FOR UPDATE OF ps SKIP LOCKED")).fetchall()
             for row in rows:
-                s=row["data"]
+                s=await self.p.load_relational_project(c,row["id"],restricted=True)
                 self._reschedule_stale(s)
                 for j in s["jobs"].values():
                     p=j["public"]
@@ -87,15 +87,15 @@ class Jobs:
                     if s["write_barrier"] and p["kind"] not in ("erase_person","delete_document","reconcile"):continue
                     if p["state"]=="running" and j["expires_at"] and datetime.fromisoformat(j["expires_at"])>now():continue
                     p.update(state="running",updated_at=iso());j["lease_token"]=secrets.token_urlsafe(32);j["expires_at"]=(now()+timedelta(seconds=self.p.lease_seconds)).isoformat();j["worker_id"]=worker_id
-                    await c.execute("UPDATE projects SET data=%s WHERE id=%s",(Jsonb(s),row["id"]))
+                    await self.p.sync_relational(c,row["id"],s,restricted=True)
                     return self._lease(j)
-                await c.execute("UPDATE projects SET data=%s WHERE id=%s",(Jsonb(s),row["id"]))
+                await self.p.sync_relational(c,row["id"],s,restricted=True)
         return None
     async def _mutate(self,lease,fn):
         async with self.p.db.connection() as c:
-            row=await (await c.execute("SELECT data FROM projects WHERE id=%s FOR UPDATE",(lease.job.project_id,))).fetchone();require(row,"lease_lost")
-            s=row["data"];j=self._check(s,lease);result=fn(s,j)
-            await c.execute("UPDATE projects SET data=%s WHERE id=%s",(Jsonb(s),lease.job.project_id))
+            s=await self.p.load_relational_project(c,lease.job.project_id,restricted=True,for_update=True);require(s,"lease_lost")
+            j=self._check(s,lease);result=fn(s,j)
+            await self.p.sync_relational(c,lease.job.project_id,s,restricted=True)
             return result
     async def heartbeat(self,lease):
         def apply(s,j):
@@ -171,7 +171,9 @@ class Jobs:
                     if did in s["documents"] and not s["documents"][did].get("deleted"):s["documents"][did].update(processing_state="completed",updated_at=iso())
                 self.p._invalidate(s)
                 # Aggregate jobs follow publication; no circular dependency on base visibility.
-                refs=[RecordVersionRef(record_id=r["record_id"],record_version=r["record_version"]) for r in s["records"].values() if r["published"] and not r.get("quarantined") and not s["documents"][r["original_doc_id"]].get("deleted") and s["documents"][r["original_doc_id"]]["ai_status"]=="active"]
+                affected_docs=set(j["work"]["document_ids"])
+                affected_records={x["record_id"] for x in j["work"]["record_versions"]}
+                refs=[RecordVersionRef(record_id=r["record_id"],record_version=r["record_version"]) for r in s["records"].values() if (r["record_id"] in affected_records or r["original_doc_id"] in affected_docs) and r["published"] and not r.get("quarantined") and not s["documents"][r["original_doc_id"]].get("deleted") and s["documents"][r["original_doc_id"]]["ai_status"]=="active"]
                 if refs:
                     plan=RebuildPlan(id=uid(),project_id=j["public"]["project_id"],record_versions=refs,memory_ids=[mid for mid,m in s["memories"].items() if m["valid"]],obsolete_entry_ids=[],dependencies=[Dependency(record_id=x.record_id,record_version=x.record_version,span_ids=[sp["span_id"] for sp in s["records"][x.record_id]["spans"]]) for x in refs],snapshot=self.p.snapshot(s))
                     s["plans"][plan.id]=dump(plan);self.p._new_job(s,j["public"]["project_id"],"rebuild_aggregate",refs=refs,plans=[plan.id])
@@ -192,31 +194,100 @@ class Jobs:
             return Job.model_validate(j["public"])
         # Publication retry after a lost response is idempotent.
         async with self.p.db.connection() as c:
-            row=await (await c.execute("SELECT data FROM projects WHERE id=%s",(lease.job.project_id,))).fetchone()
-            if row and row["data"]["jobs"].get(lease.job.id,{}).get("public",{}).get("state")=="completed":
-                return Job.model_validate(row["data"]["jobs"][lease.job.id]["public"])
+            state=await self.p.load_relational_project(c,lease.job.project_id,restricted=True)
+            if state and state["jobs"].get(lease.job.id,{}).get("public",{}).get("state")=="completed":
+                return Job.model_validate(state["jobs"][lease.job.id]["public"])
         return await self._mutate(lease,apply)
 
     async def prepare_ingestion(self,lease):
-        detected = {}
-        if lease.job.stage == "parsed" and self.p.privacy_detector is not None:
+        if lease.job.stage == "parsed":
             def read_private(s,j):
-                return [(ref["record_id"],s["records"][ref["record_id"]]["raw_spans"]) for ref in j["work"]["record_versions"]]
-            private_records = await self._mutate(lease,read_private)
-            for rid,spans in private_records:
-                for span in spans:
-                    result = await self.p.privacy_detector.detect(PrivacyDetectionInput(project_id=lease.job.project_id,record_id=rid,text=span["text"]))
-                    text=span["text"];uncertain=result.unresolved;last=0;names=[]
-                    changes=[]
-                    for detection in sorted(result.detections,key=lambda x:x.start):
-                        require(last<=detection.start<detection.end<=len(text))
-                        last=detection.end
-                        if detection.confidence=="uncertain":uncertain=True
-                        if detection.kind in ("postal_address","private_discussion"):
-                            changes.append((detection.start,detection.end,"[private context removed]"))
-                        elif detection.kind=="name":names.append(text[detection.start:detection.end])
-                    for start,end,replacement in reversed(changes):text=text[:start]+replacement+text[end:]
-                    detected[span["span_id"]]=(text,uncertain,names)
+                rows=[]
+                for ref in j["work"]["record_versions"]:
+                    record=s["records"][ref["record_id"]]
+                    title_span={"span_id":"title:"+record["record_id"],"text":s["documents"][record["original_doc_id"]]["raw_filename"]}
+                    saved=s.get("privacy_plans",{}).get(f"{record['record_id']}:{record['record_version']}")
+                    resolutions=[value for value in s.get("privacy_resolutions",{}).values() if value["record_id"]==record["record_id"] and value["record_version"]==record["record_version"]]
+                    rows.append((record,[title_span,*record["raw_spans"]],saved,dict(s["people"]),resolutions,s["privacy_generation"]))
+                return rows
+            private_records=await self._mutate(lease,read_private)
+            agent=getattr(self.p,"privacy_agent",None)
+            if agent is None:raise DomainError("provider_unavailable")
+            plans=[]
+            model=getattr(getattr(agent.provider,"settings",None),"model",None) or "configured-model"
+            for record,spans,saved,people,resolutions,privacy_generation in private_records:
+                reusable=(saved and saved.get("complete") and saved.get("source_hash")==record["source_hash"] and
+                          saved.get("policy_version")==agent.policy_version and saved.get("prompt_version")==agent.prompt_version and
+                          saved.get("model_version")==model and saved.get("identity_revision")==privacy_generation and
+                          all(not entity.get("identity_hint") or not entity["identity_hint"].startswith("PERSON_") or
+                              entity["identity_hint"] in people for entity in saved.get("entities",[])))
+                if reusable:plans.append(PrivacyPlan.model_validate(saved))
+                else:plans.append(await agent.plan(lease.job.project_id,record["record_id"],record["record_version"],spans,
+                    record["source_hash"],people,resolutions,privacy_generation))
+
+            def persist(s,j):
+                for incoming in plans:
+                    plan=dump(incoming);record=s["records"][plan["record_id"]]
+                    require(record["record_version"]==plan["record_version"] and record["source_hash"]==plan["source_hash"],"evidence_changed")
+                    by_id={"title:"+record["record_id"]:s["documents"][record["original_doc_id"]]["raw_filename"],
+                           **{span["span_id"]:span["text"] for span in record["raw_spans"]}}
+                    unresolved=set(plan["unresolved_reasons"]);new_ids={}
+                    aliases={}
+                    for pid,person in s["people"].items():
+                        for alias in [person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]]:
+                            aliases.setdefault(alias.casefold(),set()).add(pid)
+                    approved_bindings=set()
+                    for resolution in s.get("privacy_resolutions",{}).values():
+                        diagnostic=s.get("privacy_diagnostics",{}).get(resolution["diagnostic_id"])
+                        if diagnostic and resolution["decision"].startswith("bind:"):
+                            approved_bindings.add((diagnostic["span_id"],diagnostic.get("start"),diagnostic.get("end"),resolution["decision"][5:]))
+                    for entity in plan["entities"]:
+                        if entity["kind"]=="person":
+                            value=entity["expected_text"].strip();hint=entity.get("identity_hint")
+                            if entity["confidence"]=="uncertain":
+                                unresolved.add("uncertain person identity")
+                            elif hint in s["people"]:
+                                matches=aliases.get(value.casefold(),set())
+                                approved=(entity["span_id"],entity["start"],entity["end"],hint) in approved_bindings
+                                if hint not in matches or len(matches)>1 and not approved:unresolved.add("unsupported identity binding")
+                            elif hint and hint.startswith("NEW_"):
+                                if aliases.get(value.casefold()):
+                                    unresolved.add("same-name identity requires admin resolution")
+                                else:
+                                    pid=new_ids.setdefault(hint,"PERSON_"+hashlib.sha256((plan["plan_id"]+":"+hint).encode()).hexdigest()[:16])
+                                    if pid not in s["people"]:
+                                        s["people"][pid]=dump(Person(id=pid,display_name=value,kind="client",contacts=[],state="active"))
+                                    entity["identity_hint"]=pid
+                            else:unresolved.add("person lacks evidence-bound identity proposal")
+                        elif entity["kind"]=="uncertain":unresolved.add("semantic classification unresolved")
+                    for edit in plan["edits"]:
+                        entity=next((value for value in plan["entities"] if value["span_id"]==edit["span_id"] and value["start"]<=edit["start"] and value["end"]>=edit["end"]),None)
+                        if edit["reason"]=="identity":
+                            if not entity or entity.get("identity_hint") not in s["people"]:unresolved.add("identity edit is unresolved");continue
+                            edit["replacement"]=entity["identity_hint"]
+                        elif edit["reason"] in ("contact","personal_identifier"):
+                            edit["replacement"]=entity.get("identity_hint") if entity and entity.get("identity_hint") in s["people"] else "[contact removed]"
+                        elif edit["reason"]=="private_cause":edit["replacement"]="[private cause removed]"
+                    for span_id,edits in __import__("itertools").groupby(sorted(plan["edits"],key=lambda value:(value["span_id"],value["start"])),lambda value:value["span_id"]):
+                        shift=0
+                        for edit in edits:
+                            edit["sanitized_start"]=edit["start"]+shift
+                            edit["sanitized_end"]=edit["sanitized_start"]+len(edit["replacement"])
+                            shift+=len(edit["replacement"])-(edit["end"]-edit["start"])
+                    plan["unresolved_reasons"]=sorted(unresolved)
+                    s.setdefault("privacy_plans",{})[f"{plan['record_id']}:{plan['record_version']}"]=plan
+                    for diagnostic_id,value in list(s.setdefault("privacy_diagnostics",{}).items()):
+                        if value["record_id"]==plan["record_id"] and value["record_version"]==plan["record_version"] and value["state"]=="open":
+                            s["privacy_diagnostics"].pop(diagnostic_id)
+                    uncertain=[entity for entity in plan["entities"] if entity["confidence"]=="uncertain" or entity["kind"]=="uncertain"]
+                    for index,reason in enumerate([*plan["unresolved_reasons"],*["uncertain entity"]*len(uncertain)]):
+                        entity=uncertain[index-len(plan["unresolved_reasons"])] if index>=len(plan["unresolved_reasons"]) else None
+                        diagnostic=PrivacyDiagnostic(id=uid(),record_id=plan["record_id"],record_version=plan["record_version"],
+                            span_id=entity["span_id"] if entity else plan["covered_span_ids"][0],start=entity["start"] if entity else None,
+                            end=entity["end"] if entity else None,kind=entity["kind"] if entity else "uncertain",reason=reason,state="open",updated_at=now())
+                        s["privacy_diagnostics"][diagnostic.id]=dump(diagnostic)
+                return self._lease(j)
+            lease=await self._mutate(lease,persist)
         def apply(s,j):
             stage=j["public"]["stage"]
             if stage=="received":
@@ -231,21 +302,23 @@ class Jobs:
                 j["work"]["record_versions"]=refs;j["public"].update(stage="parsed",updated_at=iso())
                 return self._lease(j)
             if j["public"]["stage"]=="parsed":
-                unresolved=False
                 for ref in j["work"]["record_versions"]:
-                    r=s["records"][ref["record_id"]];ids=set()
+                    r=s["records"][ref["record_id"]];plan=s.get("privacy_plans",{}).get(f"{r['record_id']}:{r['record_version']}")
+                    require(plan and plan["complete"] and plan["source_hash"]==r["source_hash"],"privacy_unresolved")
+                    edits={}
+                    for edit in plan["edits"]:edits.setdefault(edit["span_id"],[]).append(edit)
+                    ids={entity["identity_hint"] for entity in plan["entities"] if entity.get("identity_hint") in s["people"]}
                     for sp in r["raw_spans"]:
-                        detected_text,detected_uncertain,detected_names=detected.get(sp["span_id"],(sp["text"],False,[]))
-                        known_names={person["display_name"].casefold() for person in s["people"].values()}
-                        detected_uncertain |= any(name.casefold() not in known_names for name in detected_names)
-                        normalized=normalize(detected_text,s["people"],ingestion=True)
-                        unresolved|=detected_uncertain
-                        r["spans"][sp["ordinal"]]["text"]=normalized.text;ids.update(normalized.person_ids);unresolved|=normalized.ambiguous
-                    title=normalize(s["documents"][r["original_doc_id"]]["raw_filename"],s["people"],ingestion=True)
-                    r["title"]=title.text;ids.update(title.person_ids);unresolved|=title.ambiguous
-                    r["person_ids"]=sorted(ids);r["quarantined"]=unresolved
+                        text=sp["text"]
+                        for edit in reversed(sorted(edits.get(sp["span_id"],[]),key=lambda value:value["start"])):
+                            require(text[edit["start"]:edit["end"]]==edit["expected_text"],"privacy_unresolved")
+                            text=text[:edit["start"]]+edit["replacement"]+text[edit["end"]:]
+                        r["spans"][sp["ordinal"]]["text"]=text
+                    title_id="title:"+r["record_id"];title=s["documents"][r["original_doc_id"]]["raw_filename"]
+                    for edit in reversed(sorted(edits.get(title_id,[]),key=lambda value:value["start"])):title=title[:edit["start"]]+edit["replacement"]+title[edit["end"]:]
+                    r["title"]=title;r["person_ids"]=sorted(ids);r["quarantined"]=bool(plan["unresolved_reasons"])
                     s["documents"][r["original_doc_id"]]["title"]=r["title"]
-                if unresolved:
+                if any(s["records"][ref["record_id"]]["quarantined"] for ref in j["work"]["record_versions"]):
                     j["public"].update(state="failed",error_code="privacy_unresolved",retryable=True,updated_at=iso())
                     for did in j["work"]["document_ids"]:s["documents"][did]["processing_state"]="failed"
                     return self._lease(j)
@@ -326,6 +399,12 @@ class Jobs:
                     if ch["record_id"] in record_ids:s["chunks"].pop(cid,None)
                 s["checkpoints"]={key:v for key,v in s["checkpoints"].items() if v["batch"]["job_id"]==j["public"]["id"] or not any(d["record_id"] in record_ids for d in v["batch"]["dependencies"])}
                 s["plans"]={};s["overview"]=None
+                for key,plan in list(s.get("privacy_plans",{}).items()):
+                    if plan["record_id"] in record_ids:s["privacy_plans"].pop(key)
+                for key,diagnostic in list(s.get("privacy_diagnostics",{}).items()):
+                    if diagnostic["record_id"] in record_ids:s["privacy_diagnostics"].pop(key)
+                for key,resolution in list(s.get("privacy_resolutions",{}).items()):
+                    if resolution["record_id"] in record_ids:s["privacy_resolutions"].pop(key)
                 for oldjob in s["jobs"].values():oldjob.pop("staged_overview",None)
                 j["public"]["stage"]="rebuilding"
             return self._lease(j)
@@ -358,8 +437,8 @@ class Ledger:
             op["public"]["state"]="in_flight";op["outcome"]=None
     async def report(self,ticket,outcome):
         async with self.p.db.connection() as c:
-            row=await (await c.execute("SELECT data FROM projects WHERE id=%s FOR UPDATE",(ticket.operation.project_id,))).fetchone();require(row,"capability_denied")
-            s=row["data"];op=s["operations"].get(ticket.operation.id)
+            s=await self.p.load_relational_project(c,ticket.operation.project_id,restricted=True,for_update=True);require(s,"capability_denied")
+            op=s["operations"].get(ticket.operation.id)
             require(op and secrets.compare_digest(op["completion_token"],ticket.completion_token),"capability_denied")
             require(set(outcome.completed_entry_ids)<=set(op["public"]["entry_ids"]))
             if outcome.state=="succeeded":require(set(outcome.completed_entry_ids)==set(op["public"]["entry_ids"]))
@@ -368,7 +447,7 @@ class Ledger:
             elif op["public"]["state"]=="failed":
                 require(outcome.state=="failed" or outcome.state=="succeeded","index_outcome_unknown")
             op["outcome"]=dump(outcome);op["public"]["state"]=outcome.state
-            await c.execute("UPDATE projects SET data=%s WHERE id=%s",(Jsonb(s),ticket.operation.project_id))
+            await self.p.sync_relational(c,ticket.operation.project_id,s,restricted=True)
     async def list_operations(self,cap,page):
         async with self.p.cap_transaction(cap) as (_,s):
             items=[IndexOperation.model_validate(x["public"]) for x in s["operations"].values()]

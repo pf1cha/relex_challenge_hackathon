@@ -172,7 +172,7 @@ class Maintenance:
         saved=await self.artifacts.load_staged_artifacts(cap,key)
         ctx=await self.artifacts.published_context(cap)
         deadline=datetime.now(timezone.utc)+timedelta(seconds=self.limits.request_deadline_seconds)
-        session=ToolSession(self,ctx,self.limits,deadline,self.limits.answer_search_rounds)
+        session=ToolSession(self,ctx,self.limits,deadline,self.limits.answer_search_rounds,progressive=False)
         try:
             for ref in plan.record_versions:
                 cursor=None
@@ -218,10 +218,11 @@ class Maintenance:
             try:payload=await self._draft(ctx,raw,session)
             except (ValidationError,KeyError,TypeError,ValueError):raise DomainError("contract_violation") from None
             if payload.claims:
-                payload,results=await self._review(ctx,"Project overview and later corrections",payload,deadline)
-                if any(r.verdict!="pass" for r in results):raise DomainError("contract_violation")
+                payload,assessment,results=await self._review("Project overview and later corrections",payload,session,deadline)
+                if assessment.verdict!="sufficient" or any(r.verdict!="pass" for r in results):raise DomainError("contract_violation")
                 from app.contracts.hashing import candidate_digest
-                candidate=ReviewedCandidate(**payload.model_dump(),review_results=results,candidate_digest=candidate_digest(payload),omission_proof=None)
+                candidate=ReviewedCandidate(**payload.model_dump(),review_results=results,candidate_digest=candidate_digest(payload),
+                    omission_proof=None,retrieval_review=assessment)
             else:candidate=self._empty(ctx,"no_evidence",payload.coverage)
             await self.artifacts.release_overview(cap,OverviewCandidate(memory_id=overview.id,candidate=candidate))
         removal=await self.remove_index_entries(cap,plan.obsolete_entry_ids) if plan.obsolete_entry_ids else None

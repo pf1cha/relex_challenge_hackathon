@@ -112,6 +112,8 @@ class SourceLocation(DTO):
     message_ordinal: StrictInt | None
     turn_ordinal: StrictInt | None
     timestamp_label: str | None
+    speaker_label: str | None = None
+    provenance: Literal['original', 'quoted', 'forwarded'] = 'original'
 
 class Span(DTO):
     span_id: Id
@@ -414,6 +416,12 @@ class SearchPage(DTO):
     next_cursor: str | None
     snapshot: Snapshot
 
+class RetrievalAssessment(DTO):
+    verdict: Literal['sufficient', 'insufficient']
+    missing_context: list[str]
+    suggested_queries: list[str]
+    suggested_record_ids: list[Id]
+
 class ReviewResult(DTO):
     claim_id: Id
     verdict: Literal['pass', 'fail']
@@ -432,6 +440,7 @@ class ReviewedCandidate(DTO):
     review_results: list[ReviewResult]
     candidate_digest: Digest
     omission_proof: OmissionProof | None
+    retrieval_review: RetrievalAssessment | None = None
 
 class OmissionProof(DTO):
     reviewed: ReviewedPayload
@@ -600,6 +609,58 @@ class Detection(DTO):
 class PrivacyDetectionResult(DTO):
     detections: list[Detection]
     unresolved: StrictBool
+
+PrivacyEntityKind = Literal['person', 'organization', 'role', 'contact', 'personal_identifier', 'contextual_circumstance', 'uncertain']
+class PrivacyEntity(DTO):
+    span_id: Id
+    start: StrictInt
+    end: StrictInt
+    kind: PrivacyEntityKind
+    identity_hint: str | None = None
+    evidence_span_ids: list[Id] = []
+    expected_text: str
+    confidence: Literal['certain', 'uncertain']
+
+class PrivacyEdit(DTO):
+    span_id: Id
+    start: StrictInt
+    end: StrictInt
+    expected_text: str
+    replacement: str
+    reason: Literal['identity', 'contact', 'private_cause', 'personal_identifier', 'contextual_risk']
+    sanitized_start: StrictInt | None = None
+    sanitized_end: StrictInt | None = None
+
+class PrivacyPlan(DTO):
+    plan_id: Id
+    project_id: Id
+    record_id: Id
+    record_version: Version
+    source_hash: Digest
+    policy_version: str
+    prompt_version: str
+    model_version: str
+    identity_revision: Revision
+    batch_hashes: list[Digest]
+    corrections_used: StrictInt
+    entities: list[PrivacyEntity]
+    edits: list[PrivacyEdit]
+    covered_span_ids: list[Id]
+    unresolved_reasons: list[str]
+    complete: StrictBool
+
+class PrivacyDiagnostic(DTO):
+    id: Id
+    record_id: Id
+    record_version: Version
+    span_id: Id
+    start: StrictInt | None = None
+    end: StrictInt | None = None
+    kind: PrivacyEntityKind
+    reason: str
+    state: Literal['open', 'resolved']
+    resolution: str | None = None
+    updated_at: Instant
 
 ReadContext = RequestContext | WorkReadContext
 class BeginChatReady(DTO):

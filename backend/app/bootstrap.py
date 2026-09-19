@@ -33,6 +33,7 @@ class Runtime:
 def build_runtime(settings: RuntimeSettings | None = None) -> Runtime:
     from app.evidence.postgres import Postgres
     from app.evidence.service import EvidencePlatform
+    from app.evidence.privacy import PrivacyAgent
     from app.intelligence.providers import ModelProvider, ProviderSettings
     from app.intelligence.qdrant import QdrantIndex
     from app.intelligence.service import Intelligence
@@ -45,7 +46,8 @@ def build_runtime(settings: RuntimeSettings | None = None) -> Runtime:
         embedding_model=settings.embedding_model,embedding_api_key=settings.embedding_key,
         timeout_seconds=min(120,settings.http.request_timeout_seconds)))
     index=QdrantIndex(settings.qdrant_url,settings.collection,settings.qdrant_key)
-    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=2,
+    evidence.privacy_agent = PrivacyAgent(provider)
+    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=3,
         reviewer_search_rounds=3,tool_calls_per_phase=int(os.environ.get("RELEX_TOOL_CALLS_PER_PHASE","24")),
         pages_per_phase=int(os.environ.get("RELEX_PAGES_PER_PHASE","24")),
         source_tokens_per_phase=int(os.environ.get("RELEX_SOURCE_TOKENS_PER_PHASE","24000")),

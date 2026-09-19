@@ -16,7 +16,7 @@ async def main():
         state=(await(await connection.execute('SELECT data FROM projects WHERE id=%s',(c['project_id'],))).fetchone())['data']
     raw=state['records']['08b27e0d-89ae-4c85-818f-ca173c12a58f'];record=StagedRecord(**{key:raw[key] for key in StagedRecord.model_fields})
     provider=ModelProvider(ProviderSettings(base_url=cfg.get('RELEX_MODEL_BASE_URL') or '',model=cfg.get('RELEX_MODEL_NAME') or '',api_key=cfg.get('RELEX_MODEL_API_KEY') or cfg.get('OPENAI_API_KEY') or '',embedding_base_url=cfg.get('RELEX_EMBEDDING_BASE_URL') or '',embedding_model=cfg.get('RELEX_EMBEDDING_MODEL') or '',embedding_api_key=cfg.get('RELEX_EMBEDDING_API_KEY') or cfg.get('OPENAI_API_KEY') or ''))
-    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=2,reviewer_search_rounds=3,tool_calls_per_phase=50,pages_per_phase=40,source_tokens_per_phase=120000,request_deadline_seconds=240)
+    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=3,reviewer_search_rounds=3,tool_calls_per_phase=50,pages_per_phase=40,source_tokens_per_phase=120000,request_deadline_seconds=300)
     service=Intelligence(None,None,None,None,provider,None,limits,b'private-synthetic-probe-key-000000')
     results=[]
     try:
