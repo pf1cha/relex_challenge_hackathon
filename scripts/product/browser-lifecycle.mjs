@@ -11,7 +11,7 @@ try{
  await page.goto(process.env.RELEX_LIVE_URL);await page.getByLabel("Email",{exact:true}).fill(config.admin_email);await page.getByLabel("Password",{exact:true}).fill(config.password);await page.getByRole("button",{name:"Sign in",exact:true}).click();await page.getByRole("button",{name:"Sign out",exact:true}).waitFor();
  await page.getByLabel("Text file",{exact:true}).setInputFiles("fixtures/implementation/pagination-report.txt");
  await page.getByLabel("Record type",{exact:true}).selectOption("report");
- const [upload]=await Promise.all([page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST"),page.getByRole("button",{name:"Upload",exact:true}).click()]);
+ const [upload]=await Promise.all([page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST"),page.getByRole("button",{name:"Upload and assign",exact:true}).click()]);
  const paginationJob=await upload.json();await job(paginationJob.id);
  const layoutDocument=(await request("GET",base+"/documents")).body.items.find(d=>d.latest_job_id===paginationJob.id);
  const layoutRecord=(await request("GET",base+"/documents/"+layoutDocument.id+"/records")).body.items[0];

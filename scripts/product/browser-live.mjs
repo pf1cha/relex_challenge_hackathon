@@ -30,14 +30,14 @@ try{
  record("C1-login-csrf","Real database login, incorrect password, project selector, missing CSRF, unknown query");
  await page.getByLabel("Text file",{exact:true}).setInputFiles({name:"invalid.txt",mimeType:"text/plain",buffer:Buffer.from([255,0])});
  const malformedPromise=page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST");
- await page.getByRole("button",{name:"Upload",exact:true}).click();
+ await page.getByRole("button",{name:"Upload and assign",exact:true}).click();
  assert((await malformedPromise).status()===422,"Malformed UTF-8 upload must fail visibly");
  await page.getByText("Upload supported UTF-8 text.",{exact:true}).waitFor();
  record("C2-malformed-upload","Invalid UTF-8 rejected with safe UI error; same form remains usable");
  await page.getByLabel("Text file",{exact:true}).setInputFiles("fixtures/implementation/launch-report.txt");
  await page.getByLabel("Record type",{exact:true}).selectOption("report");
  const uploadPromise=page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST");
- await page.getByRole("button",{name:"Upload",exact:true}).click();
+ await page.getByRole("button",{name:"Upload and assign",exact:true}).click();
  const uploadResponse=await uploadPromise;assert(uploadResponse.status()===202,"Upload acceptance");const job=await uploadResponse.json();
  record("C2-upload-accepted","Job "+job.id+" is accepted as processing, not completed");
  let finalJob;

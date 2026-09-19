@@ -15,7 +15,7 @@ async function job(id){for(let n=0;n<180;n++){const s=(await api(page,"GET",base
 try{
  await login(page,c.admin_email);
  await page.getByLabel("Text file",{exact:true}).setInputFiles("fixtures/implementation/launch-report.txt");await page.getByLabel("Record type",{exact:true}).selectOption("report");
- const up=page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST");await page.getByRole("button",{name:"Upload",exact:true}).click();const upload=await(await up).json();check((await job(upload.id)).state==="completed","Upload failed");
+ const up=page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST");await page.getByRole("button",{name:"Upload and assign",exact:true}).click();const upload=await(await up).json();check((await job(upload.id)).state==="completed","Upload failed");
  const doc=(await api(page,"GET",base+"/documents")).body.items[0];
  let held=await ask(page,"What Finland launch was agreed and what condition applies?");
  const duplicate=await api(page,"POST",base+"/chat",held.input);check(duplicate.status===409&&duplicate.body.error.code==="request_in_progress","Duplicate not fenced");
