@@ -169,8 +169,33 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
 .upload-panel { margin-bottom: 28px; padding: 20px; border: 1px solid #c9ddd2; border-left: 4px solid var(--accent); border-radius: 8px; background: #f4faf6; }
 .upload-panel .upload-form { margin-bottom: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .document-library > h2 { margin-top: 0; }
-.document-library > .pager-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-.document-library .document-card { min-height: 210px; margin: 0; }
+.record-type-group, .job-type-group { border-top: 1px solid var(--line); }
+.record-type-group:last-child, .job-type-group:last-child { border-bottom: 1px solid var(--line); }
+.record-type-group > summary, .job-type-group > summary { display: flex; min-height: 48px; align-items: center; gap: 10px; color: var(--ink); font-size: 14px; font-weight: 800; list-style: none; cursor: pointer; }
+.record-type-group > summary::-webkit-details-marker, .job-type-group > summary::-webkit-details-marker { display: none; }
+.record-type-group > summary::before, .job-type-group > summary::before { width: 18px; color: var(--accent-dark); content: "+"; font-size: 18px; font-weight: 500; text-align: center; }
+.record-type-group[open] > summary::before, .job-type-group[open] > summary::before { content: "-"; }
+.group-count { display: inline-grid; min-width: 24px; height: 22px; place-items: center; border-radius: 99px; background: var(--surface-soft); color: var(--ink-soft); padding: 0 7px; font-size: 10px; }
+.group-body { display: grid; gap: 7px; padding: 0 0 12px 28px; }
+.document-library .document-card { margin: 0; padding: 12px 14px; }
+.document-card-main { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.document-card-copy { min-width: 0; }
+.document-card h3 { overflow: hidden; margin-bottom: 3px; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.document-card .muted { margin: 0; font-size: 11px; }
+.document-card .card-meta { margin: 7px 0 0; }
+.document-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.document-actions button, .job-row > button { min-height: 32px; margin: 0; padding: 5px 9px; font-size: 11px; }
+.document-records { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.document-records[hidden] { display: none; }
+.document-records .pager-rows { display: grid; gap: 5px; }
+.document-records .pager-rows button { width: 100%; margin: 0; border-color: transparent; background: var(--surface-soft); color: var(--accent-dark); padding: 6px 9px; text-align: left; }
+[data-jobs] { margin-top: 30px; }
+[data-jobs] > h2 { margin-bottom: 8px; }
+.job-row { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 12px; }
+.job-copy { min-width: 0; margin-right: auto; }
+.job-copy strong { font-size: 12px; text-transform: capitalize; }
+.job-copy p { margin: 2px 0 0; font-size: 10px; }
+.job-copy .error { margin-top: 8px; font-size: 11px; }
 
 .filter-panel, .results-panel, .conversation-rail, .chat-thread, .admin-panel, .health-panel { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .search-workspace { width: 100%; }
@@ -328,6 +353,11 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .search-primary { grid-template-columns: 1fr; }
   .search-primary > button { width: 100%; }
   .filter-grid { grid-template-columns: 1fr; }
+  .group-body { padding-left: 0; }
+  .document-card-main { align-items: stretch; flex-direction: column; }
+  .document-card h3 { white-space: normal; }
+  .document-actions { justify-content: flex-start; }
+  .job-row { align-items: stretch; flex-wrap: wrap; }
   .results-header { align-items: flex-start; flex-direction: column; gap: 4px; }
   .composer { bottom: 6px; }
   .composer button { width: 100%; }

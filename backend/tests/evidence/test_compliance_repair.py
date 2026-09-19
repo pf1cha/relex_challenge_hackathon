@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.contracts.errors import DomainError
+from app.evidence.jobs import _proposed_person_id
 from app.evidence.parsing import parse
 from app.evidence.privacy import PrivacyAgent, validate_sanitized
 
@@ -86,6 +87,20 @@ class SystemCodeProvider:
         }
 
 
+class OverclassifyingProvider:
+    settings = SimpleNamespace(model="privacy-test")
+
+    async def generate(self, role, system, payload, **kwargs):
+        span = payload["spans"][0]
+        return {"entities": [
+            {"span_id": span["span_id"], "expected_text": "Katarina Voss", "kind": "person"},
+            {"span_id": span["span_id"], "expected_text": "Data Protection Officer", "kind": "person"},
+            {"span_id": span["span_id"], "expected_text": "Thursday, 30 April 2026", "kind": "personal_identifier"},
+            {"span_id": span["span_id"], "expected_text": "Thank you, that is a good response", "kind": "personal_identifier"},
+            {"span_id": span["span_id"], "expected_text": "Hansaring 82, 50670 Koln", "kind": "contact"},
+        ]}
+
+
 def test_corpus_parser_is_lossless_and_preserves_known_boundaries():
     root = Path(__file__).resolve().parents[3] / "corpus" / "acme"
     files = sorted(root.glob("*/*.txt"))
@@ -109,6 +124,19 @@ def test_transcript_disclaimer_is_not_a_turn():
     first = next(span for span in spans if span.source_location.turn_ordinal)
     assert first.source_location.line_start == 15
     assert first.source_location.speaker_label == "Marco Rossi"
+
+
+def test_identity_proposal_is_reused_across_records_in_one_upload():
+    batch_ids = {}
+    first = _proposed_person_id("plan-a", "NEW_katarina", "Katarina Voss", {}, batch_ids)
+    second = _proposed_person_id(
+        "plan-b", "NEW_katarina", "Katarina Voss", {"katarina voss": {first}}, batch_ids)
+    assert second == first
+
+
+def test_existing_same_name_outside_upload_still_requires_review():
+    assert _proposed_person_id(
+        "plan-b", "NEW_alex", "Alex Smith", {"alex smith": {"PERSON_existing"}}, {}) is None
 
 
 @pytest.mark.asyncio
@@ -155,6 +183,21 @@ async def test_privacy_compiles_contact_entity_to_source_bound_edit():
     assert [(edit.reason, edit.expected_text, edit.replacement) for edit in plan.edits] == [
         ("personal_identifier", "owner@example.test", "[personal identifier removed]")]
     assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_privacy_rejects_model_overclassification_of_roles_dates_and_prose():
+    text = ("Katarina Voss\nData Protection Officer\nThursday, 30 April 2026\n"
+            "Thank you, that is a good response\nHansaring 82, 50670 Koln")
+    plan = await PrivacyAgent(OverclassifyingProvider()).plan(
+        "project", "record", 1, [{"span_id": "s1", "text": text}],
+        hashlib.sha256(text.encode()).hexdigest())
+    assert [(entity.kind, entity.expected_text) for entity in plan.entities] == [
+        ("person", "Katarina Voss"),
+        ("contact", "Hansaring 82, 50670 Koln"),
+    ]
+    assert {edit.expected_text for edit in plan.edits} == {
+        "Katarina Voss", "Hansaring 82, 50670 Koln"}
 
 
 @pytest.mark.asyncio

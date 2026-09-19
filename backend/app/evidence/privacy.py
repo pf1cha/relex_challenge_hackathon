@@ -95,8 +95,8 @@ def person_occurs(record, person_id, people):
 
 class PrivacyAgent:
     """Mandatory bounded semantic classification with deterministic validation."""
-    policy_version = "privacy-r4-pii-only"
-    prompt_version = "privacy-plan-v7-minimal-pii"
+    policy_version = "privacy-r5-pii-shape-validation"
+    prompt_version = "privacy-plan-v8-minimal-pii"
     max_batch_codepoints = 2000
     response_schema = {
         "name": "privacy_plan_batch", "strict": True,
@@ -163,6 +163,43 @@ class PrivacyAgent:
             item["confidence"]="certain"
             resolved.append(item)
         result["entities"]=resolved
+        return result
+
+    @classmethod
+    def _filter_model_entities(cls, result):
+        """Reject semantic labels whose source text cannot have the claimed PII shape."""
+        blocked_name_parts={
+            "account", "category", "customer", "data", "delivery", "director", "executive",
+            "gmbh", "lead", "manager", "officer", "org", "project", "protection", "relex",
+            "report", "solution", "subject", "team", "technical",
+        }
+
+        def looks_like_person(value):
+            parts=value.split()
+            if not 1<=len(parts)<=4 or any(part.casefold() in blocked_name_parts for part in parts):
+                return False
+            return all(part[0].isupper() and all(char.isalpha() or char in "-'" for char in part)
+                       for part in parts if part)
+
+        def looks_like_address(value):
+            lowered=value.casefold()
+            address_terms=("street", "road", "avenue", "lane", "drive", "strasse", "straße", "ring", " rua ")
+            return any(char.isdigit() for char in value) and (
+                any(term in " "+lowered+" " for term in address_terms) or
+                bool(re.search(r"\b\d{4,6}\b",value) and "," in value)
+            )
+
+        accepted=[]
+        for entity in result.get("entities",[]):
+            value=entity.get("expected_text","")
+            kind=entity.get("kind")
+            if kind=="person" and looks_like_person(value):
+                accepted.append(entity)
+            elif kind=="contact" and (EMAIL.fullmatch(value) or PHONE.fullmatch(value) or looks_like_address(value)):
+                accepted.append(entity)
+            elif kind=="personal_identifier" and cls._personal_id.fullmatch(value):
+                accepted.append(entity)
+        result["entities"]=accepted
         return result
 
     @classmethod
@@ -272,6 +309,7 @@ class PrivacyAgent:
 
     def _validate_batch(self, result, spans, resolutions=(), people=None):
         result=self._resolve_entity_offsets(result,spans)
+        result=self._filter_model_entities(result)
         result=self._enforce_deterministic_entities(result,spans)
         result=self._enforce_known_people(result,spans,people)
         result=self._make_protective_entities_certain(result)

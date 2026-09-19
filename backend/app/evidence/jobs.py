@@ -10,6 +10,17 @@ from .service import now,iso,uid,dump,require
 from .parsing import parse
 from .privacy import normalize, person_occurs, validate_sanitized
 
+
+def _proposed_person_id(plan_id, hint, value, aliases, batch_ids):
+    """Reuse an identity proposal across records parsed from the same upload."""
+    if hint in batch_ids:
+        return batch_ids[hint]
+    if aliases.get(value.casefold()):
+        return None
+    person_id="PERSON_"+hashlib.sha256((plan_id+":"+hint).encode()).hexdigest()[:16]
+    batch_ids[hint]=person_id
+    return person_id
+
 SEQUENCES={
 "ingest":["received","parsed","privacy_ready","extracted","indexed","published"],
 "activate":["received","rebuilding","indexed","published"],
@@ -231,12 +242,13 @@ class Jobs:
                 lease=await self.heartbeat(lease)
 
             def persist(s,j):
+                new_ids={}
                 for incoming in plans:
                     plan=dump(incoming);record=s["records"][plan["record_id"]]
                     require(record["record_version"]==plan["record_version"] and record["source_hash"]==plan["source_hash"],"evidence_changed")
                     by_id={"title:"+record["record_id"]:s["documents"][record["original_doc_id"]]["raw_filename"],
                            **{span["span_id"]:span["text"] for span in record["raw_spans"]}}
-                    unresolved=set(plan["unresolved_reasons"]);new_ids={}
+                    unresolved=set(plan["unresolved_reasons"])
                     aliases={}
                     for pid,person in s["people"].items():
                         for alias in [person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]]:
@@ -255,10 +267,10 @@ class Jobs:
                                 approved=(entity["span_id"],entity["start"],entity["end"],hint) in approved_bindings
                                 if hint not in matches or len(matches)>1 and not approved:unresolved.add("unsupported identity binding")
                             elif hint and hint.startswith("NEW_"):
-                                if aliases.get(value.casefold()):
+                                pid=_proposed_person_id(plan["plan_id"],hint,value,aliases,new_ids)
+                                if pid is None:
                                     unresolved.add("same-name identity requires admin resolution")
                                 else:
-                                    pid=new_ids.setdefault(hint,"PERSON_"+hashlib.sha256((plan["plan_id"]+":"+hint).encode()).hexdigest()[:16])
                                     if pid not in s["people"]:
                                         s["people"][pid]=dump(Person(id=pid,display_name=value,kind="client",contacts=[],state="active"))
                                     entity["identity_hint"]=pid
