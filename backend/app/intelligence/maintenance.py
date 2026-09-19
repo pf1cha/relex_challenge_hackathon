@@ -47,11 +47,21 @@ class Maintenance:
             elif not isinstance(value.get("span_ids"),list) or not value["span_ids"]:reason="empty_span_ids"
             elif any(not isinstance(i,str) or i not in known for i in value["span_ids"]):reason="unknown_span_ids"
             elif not isinstance(value.get("topics",[]),list) or not isinstance(value.get("events",[]),list):reason="metadata_type"
+            if reason is None:
+                for event in value.get("events",[]):
+                    if not isinstance(event,dict):reason="event_type";break
+                    if set(event)-{"kind","topic","scope","text","span_ids","effective_time","prior_event_ids"}:reason="event_unknown_fields";break
+                    if event.get("kind") not in {"suggestion","commitment","replacement","cancellation","correction","reinstatement","conflict"}:reason="event_kind";break
+                    if any(not isinstance(event.get(field),str) or not event[field] for field in ("topic","scope","text")):reason="event_text_fields";break
+                    ids=event.get("span_ids")
+                    if not isinstance(ids,list) or not ids or any(not isinstance(i,str) or i not in known for i in ids):reason="event_span_ids";break
+                    if event.get("prior_event_ids",[])!=[]:reason="unprovided_prior_event_ids";break
+                    if not isinstance(event.get("effective_time"),dict):reason="event_effective_time_type";break
             if reason is None:return value
             # A malformed draft is never staged. One real provider formatting repair is visible in safe telemetry.
             self.provider.events.append({"role":"maintenance_validation","reason_code":reason,"attempt":attempt+1})
             payload={"record":record.model_dump(mode="json"),"allowed_span_ids":[s.span_id for s in record.spans],
-                "invalid_output":value,"validation_reason":reason,"instruction":"Repair JSON shape and source references using only supplied IDs. Do not add unsupported facts. Provide description and summary strings and at least one actual source span ID."}
+                "invalid_output":value,"validation_reason":reason,"instruction":"Repair JSON shape and source references using only supplied IDs. Do not add unsupported facts. Provide description and summary strings and actual source span IDs. Event kind must be suggestion, commitment, replacement, cancellation, correction, reinstatement, or conflict. Conditions belong in the supported event text, not a new event kind. No prior event IDs were supplied, so initial prior_event_ids must be empty."}
         error=DomainError("contract_violation");error.diagnostic={"handler":"maintenance_generation","reason_code":reason}
         raise error
 
