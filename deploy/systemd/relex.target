@@ -1,0 +1,7 @@
+[Unit]
+Description=Relex application stack
+Wants=relex-postgres.service relex-qdrant.service relex-web.service relex-worker.service
+After=network.target
+
+[Install]
+WantedBy=multi-user.target

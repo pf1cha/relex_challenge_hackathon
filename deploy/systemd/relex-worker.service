@@ -1,0 +1,17 @@
+[Unit]
+Description=Relex durable worker
+Requires=relex-migrate.service relex-qdrant.service
+After=relex-migrate.service relex-qdrant.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/mnt/relex-kai
+EnvironmentFile=/etc/relex/relex.env
+Environment=PYTHONPATH=/mnt/relex-kai/backend
+ExecStart=/mnt/relex-kai/.tools/miniforge3/envs/relex/bin/python -m app.worker
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=relex.target

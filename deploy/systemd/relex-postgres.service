@@ -1,0 +1,14 @@
+[Unit]
+Description=Relex PostgreSQL
+After=network.target
+
+[Service]
+Type=notify
+User=nobody
+WorkingDirectory=/mnt/relex-kai
+ExecStart=/mnt/relex-kai/.tools/pg/usr/lib/postgresql/18/bin/postgres -D /mnt/relex-kai/.runtime/c-postgres/data -h 127.0.0.1 -p 15432 -k /mnt/relex-kai/.runtime/c-postgres/socket
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=relex.target

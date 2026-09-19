@@ -1,0 +1,13 @@
+[Unit]
+Description=Relex Qdrant
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/relex-kai
+ExecStart=/mnt/relex-kai/scripts/intelligence/runtime/qdrant --config-path /mnt/relex-kai/scripts/intelligence/runtime/config/local.yaml
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=relex.target

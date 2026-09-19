@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply Relex database migrations
+Requires=relex-postgres.service
+After=relex-postgres.service
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/mnt/relex-kai
+EnvironmentFile=/etc/relex/relex.env
+Environment=PYTHONPATH=/mnt/relex-kai/backend
+ExecStart=/mnt/relex-kai/.tools/miniforge3/envs/relex/bin/python scripts/evidence/migrate.py
+RemainAfterExit=yes
