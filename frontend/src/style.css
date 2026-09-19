@@ -223,6 +223,9 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
 .admin-panel .member-row { grid-template-columns: minmax(120px, 1fr) auto; }
 .admin-panel .member-row small { grid-column: 1 / -1; }
 .admin-panel .member-row button { grid-column: 1 / -1; width: fit-content; }
+.member-access-form { display: grid; grid-template-columns: minmax(220px, 1.4fr) minmax(170px, .8fr) minmax(130px, .5fr) auto; align-items: end; }
+.member-access-form > .field { min-width: 0; }
+.member-access-form select, .member-access-form input { width: 100%; }
 
 .auth-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 440px); gap: clamp(44px, 7vw, 92px); align-items: center; width: min(1040px, calc(100% - 48px)); min-height: calc(100vh - 68px); margin: 0 auto; padding: 52px 0; }
 .auth-intro { max-width: 550px; }
@@ -248,6 +251,8 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .auth-intro h2 { font-size: 42px; }
   .member-row { grid-template-columns: 1fr auto; }
   .member-row small { grid-column: 1 / -1; }
+  .member-access-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .member-access-form > button { width: 100%; }
   .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -282,6 +287,7 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .stat-card { min-height: 90px; }
   .member-row { grid-template-columns: 1fr; }
   .member-row button { width: 100%; }
+  .member-access-form { grid-template-columns: 1fr; }
   .auth-layout { display: block; width: min(100% - 32px, 500px); padding: 38px 0; }
   .auth-intro { margin-bottom: 28px; }
   .auth-intro h2 { font-size: 36px; }

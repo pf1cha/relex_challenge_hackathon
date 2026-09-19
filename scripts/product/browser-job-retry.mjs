@@ -8,7 +8,7 @@ try{
  if(process.env.RELEX_FAULT_STAGE==="failure"){
   await page.getByLabel("Text file",{exact:true}).setInputFiles("fixtures/implementation/launch-report.txt");
   await page.getByLabel("Record type",{exact:true}).selectOption("report");
-  const [response]=await Promise.all([page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST"),page.getByRole("button",{name:"Upload",exact:true}).click()]);
+  const [response]=await Promise.all([page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST"),page.getByRole("button",{name:"Upload and assign",exact:true}).click()]);
   if(response.status()!==202)throw new Error("Upload not accepted");jobId=(await response.json()).id;
   fs.writeFileSync(path.join(directory,"retry-job.json"),JSON.stringify({id:jobId}));
  }else{
