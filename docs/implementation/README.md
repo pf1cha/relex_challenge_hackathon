@@ -1,8 +1,7 @@
 # Three-worker implementation plan
 
 Status: revision 3, 2026-09-19; policy defaults below are proposals, not previously approved decisions. No workers have been started. Read `architecture.md` for the concrete code layout.
-
-Target: `/scratch/project_2020551/relex-0919` exclusively. Source baseline: `0bc1d46731b6ecbfc856eedd6002a4dc866b6678`, with inherited deletions of `docs/delivery/m0-evidence.md` and `docs/delivery/m0-runbook.md`. Preserve those deletions, `.env`, corpus inputs, and unrelated changes. This plan does not rely on another checkout's code or delivery contract.
+This plan does not rely on another checkout's code or delivery contract.
 
 ## Source authority and scope
 
