@@ -173,6 +173,9 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
     async def status(ctx=Depends(context)): return await services.sources.get_status(ctx)
     @app.get(base+"/overview",response_model=Overview,dependencies=[Depends(no_query)])
     async def overview(ctx=Depends(context)): return await services.sources.get_overview(ctx)
+    @app.get(base+"/timeline",response_model=Page[TimelineRecord])
+    async def timeline(ctx=Depends(context),paging=Depends(page)):
+        return await services.sources.get_timeline(ctx,paging)
     @app.post(base+"/conversations",response_model=Conversation,status_code=201,dependencies=[Depends(no_query)])
     async def create_conversation(body: ConversationInput,ctx=Depends(context)):
         return await services.conversations.create(ctx,body.title)

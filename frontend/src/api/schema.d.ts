@@ -277,6 +277,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{p}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Timeline */
+        get: operations["timeline_api_projects__p__timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{p}/conversations": {
         parameters: {
             query?: never;
@@ -427,6 +444,40 @@ export interface paths {
         put?: never;
         /** Erase */
         post: operations["erase_api_projects__p__people__id__erase_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{p}/privacy/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Privacy Diagnostics */
+        get: operations["privacy_diagnostics_api_projects__p__privacy_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{p}/privacy/diagnostics/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Privacy */
+        post: operations["resolve_privacy_api_projects__p__privacy_diagnostics__id__resolve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -875,6 +926,13 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** Page[PrivacyDiagnostic] */
+        Page_PrivacyDiagnostic_: {
+            /** Items */
+            items: components["schemas"]["PrivacyDiagnostic"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** Page[Project] */
         Page_Project_: {
             /** Items */
@@ -886,6 +944,13 @@ export interface components {
         Page_RecordSummary_: {
             /** Items */
             items: components["schemas"]["RecordSummary"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[TimelineRecord] */
+        Page_TimelineRecord_: {
+            /** Items */
+            items: components["schemas"]["TimelineRecord"][];
             /** Next Cursor */
             next_cursor: string | null;
         };
@@ -921,6 +986,45 @@ export interface components {
             kind: "client" | "employee";
             /** Contacts */
             contacts: components["schemas"]["Contact"][];
+        };
+        /** PrivacyDiagnostic */
+        PrivacyDiagnostic: {
+            /** Id */
+            id: string;
+            /** Record Id */
+            record_id: string;
+            /** Record Version */
+            record_version: number;
+            /** Span Id */
+            span_id: string;
+            /** Start */
+            start?: number | null;
+            /** End */
+            end?: number | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "person" | "organization" | "role" | "contact" | "personal_identifier" | "contextual_circumstance" | "uncertain";
+            /** Reason */
+            reason: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "open" | "resolved";
+            /** Resolution */
+            resolution?: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** PrivacyResolutionInput */
+        PrivacyResolutionInput: {
+            /** Resolution */
+            resolution: string;
         };
         /** Project */
         Project: {
@@ -1093,6 +1197,14 @@ export interface components {
             turn_ordinal: number | null;
             /** Timestamp Label */
             timestamp_label: string | null;
+            /** Speaker Label */
+            speaker_label?: string | null;
+            /**
+             * Provenance
+             * @default original
+             * @enum {string}
+             */
+            provenance: "original" | "quoted" | "forwarded";
         };
         /** SourcePage */
         SourcePage: {
@@ -1128,6 +1240,31 @@ export interface components {
             /** Text */
             text: string;
             source_location: components["schemas"]["SourceLocation"];
+        };
+        /** TimelineRecord */
+        TimelineRecord: {
+            /** Project Id */
+            project_id: string;
+            /** Record Id */
+            record_id: string;
+            /** Original Doc Id */
+            original_doc_id: string;
+            /** Record Version */
+            record_version: number;
+            /** Title */
+            title: string;
+            /**
+             * Record Type
+             * @enum {string}
+             */
+            record_type: "email" | "transcript" | "report" | "specification";
+            source_time: components["schemas"]["SourceTime"];
+            /** Level1 Summary */
+            level1_summary: string | null;
+            /** Level2 Summary */
+            level2_summary: string | null;
+            /** Processed Content Url */
+            processed_content_url: string | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -1687,6 +1824,40 @@ export interface operations {
             };
         };
     };
+    timeline_api_projects__p__timeline_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TimelineRecord_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     conversations_api_projects__p__conversations_get: {
         parameters: {
             query?: {
@@ -2078,6 +2249,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Job"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    privacy_diagnostics_api_projects__p__privacy_diagnostics_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_PrivacyDiagnostic_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_privacy_api_projects__p__privacy_diagnostics__id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrivacyResolutionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrivacyDiagnostic"];
                 };
             };
             /** @description Validation Error */

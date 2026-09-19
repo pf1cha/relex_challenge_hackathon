@@ -1,4 +1,5 @@
 import {chromium} from "../../frontend/node_modules/playwright/index.mjs";
+import assert from "node:assert/strict";
 const browser=await chromium.launch({headless:true,args:["--no-sandbox"]});
 try{
  const page=await browser.newPage();await page.goto(process.env.RELEX_FIXTURE_ORIGIN);
@@ -6,6 +7,25 @@ try{
  await page.getByLabel("Password",{exact:true}).fill("synthetic-password");
  await page.getByRole("button",{name:"Sign in",exact:true}).click();
  await page.getByText("SYNTHETIC DEVELOPMENT FIXTURE",{exact:true}).first().waitFor();
+ await page.getByRole("link",{name:"Overview",exact:true}).click();
+ const timeline=page.locator("[data-timeline]");
+ await timeline.waitFor({timeout:3000});
+ assert.equal(await timeline.locator(".timeline-item[data-record-type]").count(),4);
+ await page.getByText("A short fixture description.",{exact:true}).first().waitFor();
+ await page.getByText("A fuller fixture summary.",{exact:true}).first().waitFor();
+ assert.match(await page.getByRole("link",{name:"Open processed content"}).first().getAttribute("href"),/^\/projects\/fixture-project\/sources\//);
+ const colors=await timeline.locator(".timeline-card").evaluateAll(cards=>cards.map(card=>getComputedStyle(card).borderTopColor));
+ assert.equal(new Set(colors).size,4);
+ const firstCard=timeline.locator(".timeline-card").first();
+ const widthBefore=await firstCard.evaluate(card=>card.getBoundingClientRect().width);
+ await page.getByRole("button",{name:"Zoom in timeline"}).click();
+ await page.waitForTimeout(250);
+ const widthAfter=await firstCard.evaluate(card=>card.getBoundingClientRect().width);
+ assert(widthAfter>widthBefore);
+ const viewport=timeline.locator(".timeline-viewport");
+ await page.getByRole("button",{name:"Scroll timeline right"}).click();
+ await page.waitForTimeout(350);
+ assert((await viewport.evaluate(node=>node.scrollLeft))>0);
  await page.getByRole("button",{name:"Sign out",exact:true}).click();
  await page.getByRole("button",{name:"Sign in",exact:true}).waitFor();
  console.log("Development browser PASS: actual routes/browser; A/B are explicit synthetic substitutes. Not acceptance.");

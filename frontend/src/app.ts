@@ -2,6 +2,7 @@ import {api,ApiError,clearProject,clearSession,setCsrf,type Models} from "./api/
 import "./style.css";
 type Me=Models["Me"]; type Project=Models["Project"]; type Answer=Models["Answer"];
 type Job=Models["Job"]; type Receipt=Models["Receipt"]; type SourcePage=Models["SourcePage"];
+type TimelineRecord=Models["TimelineRecord"];
 type PrivacyDiagnostic={id:string;record_id:string;record_version:number;span_id:string;start:number|null;end:number|null;kind:string;reason:string;state:"open"|"resolved";resolution:string|null;updated_at:string};
 type Page<T>={items:T[];next_cursor:string|null};
 const root=document.querySelector<HTMLDivElement>("#app")!;
@@ -183,11 +184,46 @@ async function chat(main:HTMLElement,mark:number){main.replaceChildren(pageHeade
  if(!pending)pending={question:question.value,conversation_id:conversation,request_id:crypto.randomUUID()};
  const answer=await api<Answer>(base()+"/chat","POST",pending);current(mark);processing.replaceWith(answerNode(answer));pending=null;questionDraft="";question.value="";send.textContent="Ask";
  }catch(e){processing.remove();showError(e);if(e instanceof ApiError&&(!e.retryable||["evidence_changed","answer_unavailable","idempotency_conflict"].includes(e.code)))pending=null;send.textContent=pending?"Retry question":"Ask";}finally{send.disabled=false;}};}
-async function overview(main:HTMLElement,mark:number){const data=await api<Models["Overview"]>(base()+"/overview");current(mark);main.replaceChildren(pageHeader("Project overview",pageDescriptions.overview,"Briefing"),el("span",data.state,"state-badge"));
- if(data.state==="ready")for(const claim of data.claims){const row=el("article",claim.text);for(const id of claim.receipt_ids){const b=button("View source",async()=>{
+function timelineTimeLabel(time:Models["SourceTime"]){
+ if(!time.value)return "Date unknown";
+ if(time.precision==="year")return time.value;
+ const normalized=time.precision==="month"?time.value+"-01T00:00:00Z":time.precision==="day"?time.value+"T00:00:00Z":time.value;
+ const date=new Date(normalized);if(Number.isNaN(date.valueOf()))return time.value;
+ const options:Intl.DateTimeFormatOptions=time.precision==="month"?{month:"short",year:"numeric",timeZone:"UTC"}:time.precision==="day"?{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}:{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"};
+ return new Intl.DateTimeFormat(undefined,options).format(date);
+}
+function timelineView(records:TimelineRecord[]){
+ const section=el("section","","timeline-section");section.dataset.timeline="true";section.setAttribute("aria-labelledby","timeline-title");
+ const header=el("div","","timeline-header"),title=el("div");const heading=el("h3","Record timeline");heading.id="timeline-title";title.append(heading,el("p",records.length+" processed record"+(records.length===1?"":"s"),"muted"));
+ const controls=el("div","","timeline-controls"),viewport=el("div","","timeline-viewport"),track=el("ol","","timeline-track");viewport.tabIndex=0;viewport.setAttribute("aria-label","Project records timeline");viewport.append(track);
+ const range=el("input");range.type="range";range.min="70";range.max="160";range.step="10";range.value="100";range.setAttribute("aria-label","Timeline zoom");
+ const zoomLabel=el("output","100%","timeline-zoom-value");zoomLabel.htmlFor=range.id="timeline-zoom";
+ let zoom=100;const applyZoom=(next:number)=>{zoom=Math.max(70,Math.min(160,next));range.value=String(zoom);zoomLabel.value=zoom+"%";track.style.setProperty("--timeline-card-width",Math.round(286*zoom/100)+"px");};
+ const control=(symbol:string,label:string,action:()=>void)=>{const result=button(symbol,action,"timeline-icon");result.type="button";result.title=label;result.setAttribute("aria-label",label);return result;};
+ controls.append(control("<","Scroll timeline left",()=>viewport.scrollBy({left:-viewport.clientWidth*.72,behavior:"smooth"})),control(">","Scroll timeline right",()=>viewport.scrollBy({left:viewport.clientWidth*.72,behavior:"smooth"})),control("-","Zoom out timeline",()=>applyZoom(zoom-10)),range,zoomLabel,control("+","Zoom in timeline",()=>applyZoom(zoom+10)));
+ range.oninput=()=>applyZoom(Number(range.value));header.append(title,controls);section.append(header);
+ const types=[...new Set(records.map(item=>item.record_type))];const legend=el("div","","timeline-legend");legend.setAttribute("aria-label","Record types");for(const type of types){const item=el("span",type,"timeline-legend-item");item.dataset.recordType=type;item.prepend(el("i","","timeline-swatch"));legend.append(item);}section.append(legend);
+ if(!records.length){section.append(emptyState("No processed records","This project has no timeline-ready records."));return section;}
+ for(const record of records){const item=el("li","","timeline-item");item.dataset.recordType=record.record_type;item.append(el("time",timelineTimeLabel(record.source_time),"timeline-date"),el("span","","timeline-marker"));
+  const card=el("article","","timeline-card"),meta=el("div","","card-meta");meta.append(el("span",record.record_type,"timeline-type"));card.append(meta,el("h4",record.title));
+  const layer1=el("section","","timeline-summary");layer1.append(el("span","Level 1 summary","timeline-summary-label"),el("p",record.level1_summary||"Summary pending."));
+  const layer2=el("section","","timeline-summary timeline-summary-secondary");layer2.append(el("span","Level 2 summary","timeline-summary-label"),el("p",record.level2_summary||"Summary pending."));card.append(layer1,layer2);
+  if(record.processed_content_url){const link=el("a","Open processed content","timeline-source-link");link.href=record.processed_content_url;link.target="_blank";link.rel="noopener";card.append(link);}item.append(card);track.append(item);
+ }
+ section.append(viewport);
+ viewport.addEventListener("wheel",event=>{if(Math.abs(event.deltaY)>Math.abs(event.deltaX)&&viewport.scrollWidth>viewport.clientWidth){viewport.scrollLeft+=event.deltaY;event.preventDefault();}},{passive:false});
+ let dragStart:number|null=null,scrollStart=0;viewport.addEventListener("pointerdown",event=>{if(event.pointerType!=="mouse"||event.button!==0||(event.target as Element).closest("a,button,input"))return;dragStart=event.clientX;scrollStart=viewport.scrollLeft;viewport.setPointerCapture(event.pointerId);viewport.classList.add("is-dragging");});
+ viewport.addEventListener("pointermove",event=>{if(dragStart!==null)viewport.scrollLeft=scrollStart-(event.clientX-dragStart);});const stopDrag=()=>{dragStart=null;viewport.classList.remove("is-dragging");};viewport.addEventListener("pointerup",stopDrag);viewport.addEventListener("pointercancel",stopDrag);
+ viewport.onkeydown=event=>{if(event.key==="ArrowLeft"||event.key==="ArrowRight"){viewport.scrollBy({left:(event.key==="ArrowLeft"?-1:1)*viewport.clientWidth*.45,behavior:"smooth"});event.preventDefault();}};
+ applyZoom(100);return section;
+}
+async function overview(main:HTMLElement,mark:number){const [data,records]=await Promise.all([api<Models["Overview"]>(base()+"/overview"),list<TimelineRecord>(base()+"/timeline")]);current(mark);main.replaceChildren(pageHeader("Project overview",pageDescriptions.overview,"Briefing"));
+ const briefing=el("section","","briefing-section"),briefingHeader=el("div","","section-heading");briefingHeader.append(el("h3","Evidence briefing"),el("span",data.state,"state-badge"));briefing.append(briefingHeader);
+ if(data.state==="ready")for(const claim of data.claims){const row=el("article",claim.text,"briefing-card");for(const id of claim.receipt_ids){const b=button("View source",async()=>{
  const fresh=await api<Models["Overview"]>(base()+"/overview");if(fresh.state!=="ready"||fresh.id!==data.id)throw new Error("Overview changed. Reload it.");
  const receipt=fresh.receipts.find(r=>r.id===id);if(!receipt)throw new Error("Source unavailable.");
- const detail=el("blockquote",receipt.quote),link=el("a",receipt.source_title);link.href=sourceLink(receipt);link.target="_blank";link.rel="noopener";detail.append(link);row.append(detail);});row.append(b);}main.append(row);}}
+ const detail=el("blockquote",receipt.quote),link=el("a",receipt.source_title);link.href=sourceLink(receipt);link.target="_blank";link.rel="noopener";detail.append(link);row.append(detail);});row.append(b);}briefing.append(row);}
+ else briefing.append(emptyState("Briefing is being prepared","The record timeline remains available while the project briefing is rebuilt."));main.append(briefing,timelineView(records));}
 async function visualization(main:HTMLElement,mark:number){const status=await api<Models["ProjectStatus"]>(base()+"/status");current(mark);const stats=el("section","","stat-grid");for(const [value,label] of [[status.eligible_documents,"Eligible documents"],[status.eligible_records,"Eligible records"],[status.write_barrier?"Paused":"Available","Workspace writes"]]){const card=el("article","","stat-card");card.append(el("strong",String(value)),el("span",String(label)));stats.append(card);}
  main.replaceChildren(pageHeader("Project status",pageDescriptions.visualization,"Workspace health"),stats,el("p","Detailed visualization modules are planned for a later release.","muted"));}
 async function administration(main:HTMLElement,mark:number){main.replaceChildren(pageHeader("Project administration",pageDescriptions.administration,"Admin tools"),el("p","Membership controls access to this workspace. Personnel associations and erasure remain separate.","section-note"));

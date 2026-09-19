@@ -29,6 +29,13 @@ class FixtureServices:
     async def list_documents(self,ctx,page): return Page[Document](items=[],next_cursor=None)
     async def get_status(self,ctx):
         return ProjectStatus(project_id=ctx.project_id,eligible_documents=0,eligible_records=0,operational_job_counts={},write_barrier=False,snapshot=Snapshot(corpus_generation=1,privacy_generation=0))
+    async def get_overview(self,ctx):
+        return Overview(state="pending",id=None,claims=[],receipts=[],coverage=None,snapshot=Snapshot(corpus_generation=1,privacy_generation=0),error_code=None)
+    async def get_timeline(self,ctx,page):
+        items=[]
+        for index,record_type in enumerate(("email","transcript","report","specification"),1):
+            items.append(TimelineRecord(project_id=ctx.project_id,record_id=f"fixture-record-{index}",original_doc_id="fixture-document",record_version=1,title=f"Fixture {record_type} record",record_type=record_type,source_time=SourceTime(value=f"2026-09-{index+10:02d}",precision="day",timezone=None),level1_summary="A short fixture description.",level2_summary="A fuller fixture summary.",processed_content_url=f"/projects/fixture-project/sources/fixture-record-{index}?version=1&span=fixture-span"))
+        return Page[TimelineRecord](items=items,next_cursor=None)
     async def list_jobs(self,ctx,page): return Page[Job](items=[],next_cursor=None)
     async def begin_chat(self,ctx,input):
         self.calls.append("begin")

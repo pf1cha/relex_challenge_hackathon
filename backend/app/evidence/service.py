@@ -236,6 +236,26 @@ class EvidencePlatform:
                 except DomainError:pass
                 else:return Overview(state="ready",id=s["overview"]["id"],claims=candidate.claims,receipts=candidate.receipts,coverage=candidate.coverage,snapshot=self.snapshot(s),error_code=None)
             return Overview(state="pending",id=None,claims=[],receipts=[],coverage=None,snapshot=self.snapshot(s),error_code=None)
+    async def get_timeline(self,ctx,page):
+        async with self.transaction(ctx) as (_,s):
+            summaries={}
+            valid_memories=(stored.get("data",{}) for stored in s["memories"].values() if stored.get("valid"))
+            for memory in sorted(valid_memories,key=lambda value:(value.get("updated_at",""),value.get("id",""))):
+                if memory.get("project_id")!=ctx.project_id or memory.get("kind")!="record" or memory.get("level") not in (1,2):continue
+                for dependency in memory.get("dependencies",[]):
+                    key=(dependency.get("record_id"),dependency.get("record_version"))
+                    summaries.setdefault(key,{})[memory["level"]]=memory.get("text")
+            items=[]
+            for r in s["records"].values():
+                document=s["documents"].get(r["original_doc_id"])
+                if not document or document.get("deleted") or (ctx.role!="admin" and document.get("ai_status")!="active"):continue
+                if not r.get("published") or r.get("quarantined"):continue
+                record_summaries=summaries.get((r["record_id"],r["record_version"]),{})
+                first_span=next(iter(r.get("spans",[])),None)
+                source_url=None if first_span is None else f"/projects/{quote(ctx.project_id,safe='')}/sources/{quote(r['record_id'],safe='')}?version={r['record_version']}&span={quote(first_span['span_id'],safe='')}"
+                items.append(TimelineRecord(project_id=ctx.project_id,record_id=r["record_id"],original_doc_id=r["original_doc_id"],record_version=r["record_version"],title=r["title"],record_type=r["record_type"],source_time=r["source_time"],level1_summary=record_summaries.get(1),level2_summary=record_summaries.get(2),processed_content_url=source_url))
+            items.sort(key=lambda item:(item.source_time.value is None,item.source_time.value or "",item.record_id))
+            return self._page(items,page,self._binding(ctx,s,"timeline"))
     async def get_filters(self,ctx):
         async with self.transaction(ctx) as (_,s):
             rs=[]
