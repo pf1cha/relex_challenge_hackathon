@@ -31,6 +31,8 @@ function pageLink(name:string,selected:boolean){const link=el("a",pageLabels[nam
 function input(label:string,type="text",value=""){const n=el("input");n.type=type;n.value=value;n.setAttribute("aria-label",label);n.placeholder=label;return n;}
 function select(label:string, values:[string,string][], value=""){const n=el("select");n.setAttribute("aria-label",label);for(const [v,t]of values){const o=el("option",t);o.value=v;n.append(o);}if(values.some(([v])=>v===value))n.value=value;return n;}
 function field(label:string,node:HTMLElement){const wrap=el("label",label,"field");wrap.append(node);return wrap;}
+function pageHeader(title:string,description:string,eyebrow="Workspace"){const header=el("header","","page-header");header.append(el("span",eyebrow,"eyebrow"),el("h2",title),el("p",description,"page-description"));return header;}
+function emptyState(title:string,description:string){const state=el("div","","empty-state");state.append(el("strong",title),el("p",description));return state;}
 function locationLabel(location:Models["SourceLocation"]){return [
  location.line_start!==null?"Line "+location.line_start+(location.line_end!==location.line_start?"–"+location.line_end:""):"",
  location.paragraph!==null?"Paragraph "+location.paragraph:"",
