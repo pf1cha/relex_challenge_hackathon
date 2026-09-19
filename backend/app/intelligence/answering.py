@@ -24,7 +24,7 @@ class Answers:
         except (ProviderFailure,TimeoutError):raise DomainError("provider_unavailable") from None
 
     async def _agent(self,role,session,payload):
-        guidance=None;shallow_retries=0
+        guidance=None;shallow_retries=0;tool_retries=0;evidence_retries=0
         while True:
             request={**(payload() if callable(payload) else payload),"tool_results":session.results,
                 "coverage":session.coverage().model_dump(mode="json"),"retrieval_state":session.retrieval_state()}
@@ -44,12 +44,42 @@ class Answers:
                         "suggested_queries":feedback.get("suggested_queries",[]),
                         "suggested_record_ids":feedback.get("suggested_record_ids",[])}
                     continue
+                unread=set()
+                for claim in result.get("claims",[]) if isinstance(result.get("claims"),list) else []:
+                    for source in claim.get("evidence",[]) if isinstance(claim,dict) and isinstance(claim.get("evidence"),list) else []:
+                        if not isinstance(source,dict):continue
+                        key=(source.get("record_id"),source.get("record_version"))
+                        known=session.spans.get(key,{})
+                        ids=source.get("span_ids",[])
+                        if key[0] and (not known or not isinstance(ids,list) or any(span_id not in known for span_id in ids)):
+                            unread.add(key[0])
+                if role in {"answer","repair"} and unread and evidence_retries<3:
+                    evidence_retries+=1
+                    guidance={"code":"unread_evidence",
+                        "message":"The final answer cites evidence that has not been loaded with read_record. Read every suggested record returned by search_sources, then cite only span IDs present in those read_record results.",
+                        "requires_source_search":any(record_id not in session.source_records for record_id in unread),
+                        "suggested_record_ids":sorted(unread)}
+                    continue
                 return result
             if not isinstance(result["tools"],list) or not result["tools"]:raise DomainError("contract_violation")
+            tool=None
             try:
                 for tool in result["tools"]:
                     if set(tool)!={"name","arguments"}:raise DomainError("contract_violation")
                     await session.call(tool["name"],tool["arguments"])
+            except (DomainError,ValidationError,KeyError,TypeError,ValueError) as error:
+                if isinstance(error,DomainError) and error.code not in {"invalid_input","not_found"}:raise
+                if tool_retries>=4:raise DomainError("contract_violation") from None
+                tool_retries+=1
+                name=tool.get("name") if isinstance(tool,dict) else None
+                arguments=tool.get("arguments",{}) if isinstance(tool,dict) else {}
+                requires_source_search=name=="read_record" and arguments.get("record_id") not in session.source_records
+                guidance={"code":"invalid_tool_sequence",
+                    "message":"The requested tool call is not valid for the current retrieval state. Follow the progressive retrieval order, do not repeat an identical call, and use only IDs returned by prior tools.",
+                    "rejected_tool":name,"requires_source_search":requires_source_search,
+                    "allowed_search_filters":["date_from","date_to","record_type","original_doc_id","topic_id","person_id"],
+                    "suggested_record_ids":[arguments["record_id"]] if requires_source_search and arguments.get("record_id") else []}
+                continue
             except BudgetExhausted:
                 # One final provider response with explicit exhausted coverage, no new tools.
                 result=await self._generate(role,prompt("reviewer" if role=="review" else "answer"),
@@ -134,6 +164,7 @@ class Answers:
         repair.discovered_records=set(session.discovered_records);repair.level2_records=set(session.level2_records)
         repair.source_records=set(session.source_records);repair.source_searches=session.source_searches
         repair.pending_searches=set(session.pending_searches);repair.pending_histories=set(session.pending_histories)
+        repair.completed_calls=set(session.completed_calls)
         return repair
 
     async def answer(self,ctx,input):

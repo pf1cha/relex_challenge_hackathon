@@ -117,3 +117,19 @@ async def test_level_3_record_read_requires_source_search_first():
         await value.call("read_record", {"record_id": "record-1"})
 
     assert error.value.code == "invalid_input"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_tool_call_is_rejected_without_consuming_budget():
+    _, value = session()
+    await value.discover("launch date")
+    await value.call("search_sources", {"query": "launch date"})
+    calls = value.calls
+    results = len(value.results)
+
+    with pytest.raises(DomainError) as error:
+        await value.call("search_sources", {"query": "launch date"})
+
+    assert error.value.code == "invalid_input"
+    assert value.calls == calls
+    assert len(value.results) == results
