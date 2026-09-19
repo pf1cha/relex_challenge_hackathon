@@ -13,8 +13,14 @@ class RegisterInput(DTO):
 class ConversationInput(DTO):
     title: Annotated[str, Field(min_length=1, max_length=120)] = "New Chat"
 class MemberInput(DTO):
-    user_id: Id
+    user_id: Id | None = None
+    email: Annotated[str, Field(min_length=3, max_length=320)] | None = None
     role: Role
+    @model_validator(mode="after")
+    def identity(self):
+        if (self.user_id is None) == (self.email is None):
+            raise ValueError("Supply exactly one account ID or email")
+        return self
 class SearchBody(DTO):
     query: Annotated[str, Field(min_length=1, max_length=8000)]
     filters: SearchFilters

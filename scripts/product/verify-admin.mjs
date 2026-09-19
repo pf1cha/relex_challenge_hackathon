@@ -1,0 +1,34 @@
+import {chromium} from '../../frontend/node_modules/playwright/index.mjs';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {randomUUID} from 'node:crypto';
+const cfg=JSON.parse(readFileSync('.runtime/manual/admin-check.json','utf8'));
+const browser=await chromium.launch({headless:true}),url='http://127.0.0.1:18080';
+const page=await browser.newPage(), member=await browser.newPage();
+const email='member-check-'+randomUUID()+'@example.test',password=randomUUID();
+try{
+ await member.goto(url);await member.getByRole('button',{name:'Register',exact:true}).click();
+ await member.getByLabel('Display name',{exact:true}).fill('Access verification member');
+ await member.getByLabel('Email',{exact:true}).fill(email);await member.getByLabel('Password',{exact:true}).fill(password);
+ await member.getByRole('button',{name:'Create account',exact:true}).click();
+ await member.getByText('No project access has been assigned',{exact:false}).waitFor();
+ await page.goto(url);await page.getByLabel('Email',{exact:true}).fill(cfg.email);
+ await page.getByLabel('Password',{exact:true}).fill(cfg.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
+ await page.getByRole('button',{name:'Administration',exact:true}).click();
+ await page.getByLabel('Registered email or account ID',{exact:true}).fill(email.toUpperCase());
+ page.on('dialog',d=>d.accept());
+ const saved=page.waitForResponse(r=>r.url().endsWith('/members')&&r.request().method()==='POST');
+ await page.getByRole('button',{name:'Grant or update access',exact:true}).click();
+ if((await saved).status()!==200)throw Error('Grant failed');
+ await page.getByText('Access verification member · member',{exact:false}).waitFor();
+ await member.reload();await member.getByRole('button',{name:'Documents',exact:true}).waitFor();
+ if(await member.getByRole('button',{name:'Administration',exact:true}).count())throw Error('Member admin UI exposed');
+ const forbidden=await member.request.get(url+'/api/projects/'+cfg.project+'/members');
+ if(forbidden.status()!==403)throw Error('Member authorization failed');
+ const row=page.locator('article').filter({hasText:'Access verification member'});
+ const removed=page.waitForResponse(r=>r.request().method()==='DELETE'&&r.url().includes('/members/'));
+ await row.getByRole('button',{name:'Remove membership',exact:true}).click();
+ if((await removed).status()!==204)throw Error('Revoke failed');
+ await member.reload();await member.getByText('No project access has been assigned',{exact:false}).waitFor();
+ const result={status:'PASS',checks:['Admin browser grant by normalized email','Member sees assigned project after reload','Member cannot access admin UI/API','Admin browser revoke removes access']};
+ writeFileSync('.runtime/manual/admin-verification.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+}finally{await browser.close()}

@@ -204,7 +204,10 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
     @app.get(base+"/members",response_model=Page[Member])
     async def members(ctx=Depends(admin),paging=Depends(page)): return await services.administration.list_members(ctx,paging)
     @app.post(base+"/members",response_model=Member,dependencies=[Depends(no_query)])
-    async def set_member(body: MemberInput,ctx=Depends(admin)): return await services.administration.set_member(ctx,body.user_id,body.role)
+    async def set_member(body: MemberInput,ctx=Depends(admin)):
+        if body.email is not None:
+            return await services.administration.set_member_by_email(ctx,body.email,body.role)
+        return await services.administration.set_member(ctx,body.user_id,body.role)
     @app.delete(base+"/members/{id}",status_code=204,dependencies=no_input)
     async def remove_member(id: Id,ctx=Depends(admin)):
         await services.administration.remove_member(ctx,id)

@@ -276,6 +276,15 @@ class EvidencePlatform:
                 u=await (await c.execute("SELECT display_name FROM users WHERE id=%s",(user_id,))).fetchone()
                 items.append(Member(user_id=user_id,display_name=u["display_name"],role=m["role"],granted_at=m["granted_at"]))
             return self._page(sorted(items,key=lambda x:(x.granted_at,x.user_id)),page,self._binding(ctx,s,"members"))
+    async def set_member_by_email(self,ctx,email,role):
+        # Require project administration before looking up a registered account.
+        async with self.transaction(ctx,admin=True) as (c,s):
+            u=await (await c.execute("SELECT id FROM users WHERE email=%s AND active",
+                                    (email.strip().casefold(),))).fetchone()
+            require(u,"not_found")
+            user_id=u["id"]
+        return await self.set_member(ctx,user_id,role)
+
     async def set_member(self,ctx,user_id,role):
         require(role in ("admin","member"),"invalid_input")
         async with self.transaction(ctx,admin=True) as (c,s):

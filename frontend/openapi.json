@@ -2526,10 +2526,30 @@
       "MemberInput": {
         "properties": {
           "user_id": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "User Id"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 320,
+                "minLength": 3
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
           },
           "role": {
             "type": "string",
@@ -2543,7 +2563,6 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "user_id",
           "role"
         ],
         "title": "MemberInput"

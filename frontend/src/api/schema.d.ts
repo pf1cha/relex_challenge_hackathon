@@ -771,7 +771,9 @@ export interface components {
         /** MemberInput */
         MemberInput: {
             /** User Id */
-            user_id: string;
+            user_id?: string | null;
+            /** Email */
+            email?: string | null;
             /**
              * Role
              * @enum {string}
