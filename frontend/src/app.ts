@@ -171,23 +171,29 @@ function answerNode(answer:Answer){const row=el("article","","message assistant-
  row.append(el("small","Coverage: "+answer.coverage.state));for(const lim of answer.coverage.limitations)row.append(el("p",lim.code.replaceAll("_"," "),"muted"));return row;}
 async function chat(main:HTMLElement,mark:number){main.replaceChildren(pageHeader("AI chat",pageDescriptions.chat,"Ask with confidence"));
  const conversations=await list<Models["Conversation"]>(base()+"/conversations");current(mark);
- const choose=select("Conversation",[["","New chat"],...conversations.map(c=>[c.id,c.title] as [string,string])],conversation||"");
- choose.onchange=()=>{conversation=choose.value||null;pending=null;renderView();};main.append(choose);
- const messages=el("section");messages.id="messages";main.append(messages);
+ const selectedConversation=conversations.find(item=>item.id===conversation)||null;if(conversation&&!selectedConversation)conversation=null;
+ const layout=el("section","","chat-layout"),rail=el("aside","","conversation-rail"),railHeader=el("div","","conversation-heading"),conversationList=el("div","","conversation-list"),thread=el("section","","chat-thread"),threadHeader=el("header","","chat-thread-header");rail.setAttribute("aria-label","Conversations");conversationList.setAttribute("role","list");
+ railHeader.append(el("h3","Conversations"),el("span",String(conversations.length),"conversation-count"));const newChat=button("New chat",()=>{conversation=null;pending=null;questionDraft="";renderView();},"new-chat-button");newChat.type="button";rail.append(railHeader,newChat);
+ for(const item of conversations){const entry=button("",()=>{conversation=item.id;pending=null;questionDraft="";renderView();},"conversation-item"+(item.id===conversation?" selected":""));entry.type="button";entry.setAttribute("role","listitem");if(item.id===conversation)entry.setAttribute("aria-current","true");const updated=new Date(item.updated_at);entry.append(el("strong",item.title),el("small",Number.isNaN(updated.getTime())?"Recent":new Intl.DateTimeFormat(undefined,{day:"numeric",month:"short",year:"numeric"}).format(updated)));conversationList.append(entry);}
+ if(!conversations.length)conversationList.append(el("p","No saved conversations yet.","conversation-empty"));rail.append(conversationList);
+ const titleGroup=el("div","","chat-title-group");titleGroup.append(el("span",conversation?"CONVERSATION":"NEW CONVERSATION","eyebrow"),el("h3",selectedConversation?.title||"Ask your project evidence"));threadHeader.append(titleGroup,el("span","Evidence-backed","chat-mode"));thread.append(threadHeader);
+ const messages=el("section");messages.id="messages";messages.setAttribute("aria-live","polite");thread.append(messages);let messageCount=0;
  if(conversation){for(const m of await list<Models["Message"]>(base()+"/conversations/"+encodeURIComponent(conversation)+"/messages")){current(mark);
- if(m.state==="available"&&m.role==="assistant"&&m.answer_id){try{messages.append(answerNode(await api<Answer>(base()+"/answers/"+encodeURIComponent(m.answer_id))));}catch(e){messages.append(el("p","Previous answer unavailable. Regenerate it."));}}
- else {const message=el("article","","message "+(m.role==="assistant"?"assistant-message":"user-message"));message.append(el("span",m.role==="assistant"?"Assistant":"You","message-label"),el("p",m.state==="unavailable"?"Previous answer unavailable. Regenerate it.":m.text||m.unavailable_reason||m.state));messages.append(message);}}}
+ if(m.state==="available"&&m.role==="assistant"&&m.answer_id){try{messages.append(answerNode(await api<Answer>(base()+"/answers/"+encodeURIComponent(m.answer_id))));}catch(e){messages.append(el("p","Previous answer unavailable. Regenerate it.","chat-inline-error"));}}
+ else {const message=el("article","","message "+(m.role==="assistant"?"assistant-message":"user-message"));message.append(el("span",m.role==="assistant"?"Relex":"You","message-label"),el("p",m.state==="unavailable"?"Previous answer unavailable. Regenerate it.":m.text||m.unavailable_reason||m.state));messages.append(message);}messageCount++;}}
  current(mark);
+ if(!messageCount){const welcome=el("div","","chat-empty");welcome.append(el("span","R","chat-empty-mark"),el("strong",conversation?"This conversation is empty":"Start a new conversation"),el("p","Ask about the approved evidence in this workspace."));messages.append(welcome);}
  const form=el("form"),question=el("textarea");question.setAttribute("aria-label","Question");question.maxLength=8000;question.required=true;question.value=questionDraft;
  question.oninput=()=>{questionDraft=question.value;if(pending&&pending.question!==question.value)pending=null;};
- question.placeholder="Ask a question about this workspace's approved evidence…";const send=el("button",pending?"Retry question":"Ask question");send.type="submit";form.className="composer";form.append(question,send);main.append(form);
+ question.placeholder="Ask a question about this workspace's approved evidence…";const send=el("button",pending?"Retry":"Ask");send.type="submit";form.className="composer";form.append(question,send);thread.append(form);layout.append(rail,thread);main.append(layout);
+ question.onkeydown=event=>{if(event.key==="Enter"&&!event.shiftKey&&!event.isComposing){event.preventDefault();form.requestSubmit();}};
  const status=await api<Models["ProjectStatus"]>(base()+"/status");current(mark);send.disabled=status.write_barrier;
- if(status.write_barrier)main.append(el("p","Project cleanup is in progress. Your unsent text stays only in this tab.","banner"));
- form.onsubmit=async e=>{e.preventDefault();send.disabled=true;const processing=el("p","Finding evidence and independently reviewing the answer…");messages.append(processing);
- try{if(!conversation){const c=await api<Models["Conversation"]>(base()+"/conversations","POST",{});conversation=c.id;}
+ if(status.write_barrier)thread.append(el("p","Project cleanup is in progress. Your unsent text stays only in this tab.","banner"));
+ form.onsubmit=async e=>{e.preventDefault();if(!question.value.trim())return;send.disabled=true;messages.querySelector(".chat-empty")?.remove();const processing=el("article","","message assistant-message processing-message");processing.append(el("span","Reviewing evidence","message-label"),el("p","Finding relevant sources and checking the answer…"));messages.append(processing);processing.scrollIntoView({block:"nearest"});let createdConversation=false;
+ try{if(!conversation){const c=await api<Models["Conversation"]>(base()+"/conversations","POST",{});conversation=c.id;createdConversation=true;}
  if(!pending)pending={question:question.value,conversation_id:conversation,request_id:crypto.randomUUID()};
- const answer=await api<Answer>(base()+"/chat","POST",pending);current(mark);processing.replaceWith(answerNode(answer));pending=null;questionDraft="";question.value="";send.textContent="Ask";
- }catch(e){processing.remove();showError(e);if(e instanceof ApiError&&(!e.retryable||["evidence_changed","answer_unavailable","idempotency_conflict"].includes(e.code)))pending=null;send.textContent=pending?"Retry question":"Ask";}finally{send.disabled=false;}};}
+ const answer=await api<Answer>(base()+"/chat","POST",pending);current(mark);processing.replaceWith(answerNode(answer));pending=null;questionDraft="";question.value="";send.textContent="Ask";if(createdConversation)await renderView();
+ }catch(e){processing.remove();showError(e);if(e instanceof ApiError&&(!e.retryable||["evidence_changed","answer_unavailable","idempotency_conflict"].includes(e.code)))pending=null;send.textContent=pending?"Retry":"Ask";}finally{send.disabled=false;}};}
 function timelineTimestamp(time:Models["SourceTime"]){
  if(!time.value)return null;
  const normalized=time.precision==="year"?time.value+"-01-01T00:00:00Z":time.precision==="month"?time.value+"-01T00:00:00Z":time.precision==="day"?time.value+"T00:00:00Z":time.value;
