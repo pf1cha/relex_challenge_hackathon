@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "relex-memory"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.10,<3"]
+
+[project.optional-dependencies]
+evidence = ["psycopg[binary]>=3.2,<4"]
+intelligence = ["httpx>=0.28,<1"]
+product = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-multipart>=0.0.20", "httpx>=0.28,<1", "python-dotenv>=1,<2"]
+test = ["pytest>=8", "pytest-asyncio>=0.25"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
