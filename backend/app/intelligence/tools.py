@@ -1,6 +1,7 @@
 """Read-only tools bound to a server context and one finite phase budget."""
 from __future__ import annotations
 import math
+import asyncio
 from datetime import datetime,timezone
 from app.contracts.models import *
 from app.contracts.errors import DomainError
@@ -30,6 +31,13 @@ class ToolSession:
         self.tokens+=charge;self.pages+=int(page)
 
     async def call(self,name,args):
+        self.check()
+        try:
+            async with asyncio.timeout((self.deadline-datetime.now(timezone.utc)).total_seconds()):
+                return await self._call(name,args)
+        except TimeoutError:raise DomainError("provider_unavailable") from None
+
+    async def _call(self,name,args):
         self.check();self.calls+=1
         allowed={"search_memory":{"query","filters","cursor"},"read_record":{"record_id","cursor"},
           "read_memory":{"memory_id"},"get_decision_history":{"topic_id","scope","as_of","cursor"},

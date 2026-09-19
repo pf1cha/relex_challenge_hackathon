@@ -6,11 +6,30 @@ from app.contracts.models import *
 from app.contracts.hashing import record_artifact_key,aggregate_artifact_key,make_entry_id,compact
 from app.contracts.errors import DomainError
 from pydantic import ValidationError
+from functools import wraps
+import traceback
 from .providers import ProviderFailure
 from .qdrant import IndexFailure
 from .chunking import stable_id,make_chunks,embedding_input
 from .answering import prompt
 from .tools import ToolSession,BudgetExhausted
+
+def safe_contract(function):
+    @wraps(function)
+    async def guarded(*args,**kwargs):
+        try:return await function(*args,**kwargs)
+        except (DomainError,ValidationError,KeyError,TypeError,ValueError) as exc:
+            error=exc if isinstance(exc,DomainError) else DomainError("contract_violation")
+            error.diagnostic={"handler":function.__name__,"frames":[{"file":frame.filename.rsplit("/",1)[-1],"line":frame.lineno} for frame in traceback.extract_tb(exc.__traceback__)],
+                "validation_types":[entry["type"] for entry in exc.errors()] if isinstance(exc,ValidationError) else []}
+            raise error from None
+    return guarded
+
+def supported_time(raw):
+    try:return SourceTime.model_validate(raw)
+    except (ValidationError,TypeError,ValueError):
+        # A month name without a year is not a YYYY-MM date. Preserve uncertainty.
+        return SourceTime(value=None,precision="unknown",timezone=None)
 
 class Maintenance:
     async def _maintenance_generation(self,record):
@@ -22,6 +41,7 @@ class Maintenance:
         if not ids or not set(ids)<=known or not isinstance(value.get("description"),str) or not isinstance(value.get("summary"),str):raise DomainError("contract_violation")
         return value
 
+    @safe_contract
     async def process_record(self,cap,ref):
         key=record_artifact_key(ref.record_id,ref.record_version)
         saved=await self.artifacts.load_staged_artifacts(cap,key)
@@ -90,7 +110,7 @@ class Maintenance:
             if not set(raw.get("span_ids",[]))<=known or not raw.get("span_ids"):raise DomainError("contract_violation")
             event=HistoryEvent(id=str(uuid4()),topic_id=stable_id(cap.project_id,"topic",raw["topic"].strip().casefold()),
                 scope=raw["scope"],kind=raw["kind"],text=raw["text"],source_time=record.source_time,
-                effective_time=SourceTime(**raw["effective_time"]),learned_at=now,
+                effective_time=supported_time(raw["effective_time"]),learned_at=now,
                 evidence=[EvidenceRef(project_id=cap.project_id,original_doc_id=record.original_doc_id,record_id=record.record_id,
                     record_version=record.record_version,span_ids=raw["span_ids"])],prior_event_ids=raw.get("prior_event_ids",[]),review_state="pending")
             # Review a proposed relation in a separate context. Existing linked events must be eligible.
@@ -119,6 +139,7 @@ class Maintenance:
             events.append(event)
         return events
 
+    @safe_contract
     async def rebuild_affected(self,cap,plan):
         # Reload the authorized plan, never trust a stale caller-supplied dependency set.
         current=await self.artifacts.load_rebuild_plan(cap,plan.id)
@@ -187,6 +208,11 @@ class Maintenance:
         ids=sorted(set(entry_ids));key="remove:"+sha256(compact(ids).encode()).hexdigest()
         ticket=await self.ledger.prepare(cap,IndexOperationInput(idempotency_key=key,action="delete",entries=[],entry_ids=ids))
         try:
+            if ticket.operation.state=="succeeded":
+                if not await self.index.fetch(ids):
+                    return MaintenanceResult(batch_id=None,operation_ids=[ticket.operation.id],changed_entry_ids=[],removed_entry_ids=ids,unchanged_entry_ids=[])
+                # A late obsolete write requires a new durable delete, not a rewritten acknowledgement.
+                ticket=await self.ledger.prepare(cap,IndexOperationInput(idempotency_key=key+":after:"+ticket.operation.id,action="delete",entries=[],entry_ids=ids))
             await self.ledger.start(cap,ticket.operation.id)
             verified=await self.index.delete(ids)
             await self.ledger.report(ticket,IndexOutcome(state="succeeded" if verified else "unknown",completed_entry_ids=ids if verified else [],error_code=None if verified else "index_outcome_unknown",observed_at=datetime.now(timezone.utc)))

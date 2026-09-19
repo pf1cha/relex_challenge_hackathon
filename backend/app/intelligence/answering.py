@@ -60,15 +60,25 @@ class Answers:
                 known=session.spans.get(key,{})
                 ids=source["span_ids"]
                 if not ids or any(s not in known for s in ids):raise DomainError("contract_violation")
-                ordinals=[known[s].ordinal for s in ids]
-                if ordinals!=list(range(ordinals[0],ordinals[0]+len(ordinals))):raise DomainError("contract_violation")
+                # Each receipt is contiguous; separate nonadjacent supports instead of inventing a joined quote.
+                ordered=sorted(set(ids),key=lambda sid:known[sid].ordinal)
+                groups=[]
+                for sid in ordered:
+                    if not groups or known[sid].ordinal!=known[groups[-1][-1]].ordinal+1:groups.append([])
+                    groups[-1].append(sid)
                 record=session.records[key]["summary"]
-                ref=EvidenceRef(project_id=ctx.project_id,original_doc_id=record.original_doc_id,**source)
-                receipt=await self.reader.make_receipt(ctx,ref)
-                if receipt.evidence_ref!=ref or receipt.quote!="\n".join(known[s].text for s in ids):raise DomainError("contract_violation")
-                receipts.append(receipt);receipt_ids.append(receipt.id)
+                for group in groups:
+                    ref=EvidenceRef(project_id=ctx.project_id,original_doc_id=record.original_doc_id,
+                        record_id=key[0],record_version=key[1],span_ids=group)
+                    receipt=await self.reader.make_receipt(ctx,ref)
+                    if receipt.evidence_ref!=ref or receipt.quote!="\n".join(known[s].text for s in group):raise DomainError("contract_violation")
+                    receipts.append(receipt);receipt_ids.append(receipt.id)
+            effective=value.get("effective_at")
+            if effective is not None:
+                try:effective=SourceTime.model_validate(effective)
+                except (ValidationError,TypeError,ValueError):effective=SourceTime(value=None,precision="unknown",timezone=None)
             claims.append(Claim(id=str(uuid4()),text=value["text"],receipt_ids=list(dict.fromkeys(receipt_ids)),
-                status=value.get("status"),scope=value.get("scope"),effective_at=value.get("effective_at")))
+                status=value.get("status"),scope=value.get("scope"),effective_at=effective))
         receipts=list({r.id:r for r in receipts}.values())
         return ReviewedPayload(claims=claims,receipts=receipts,dependencies=session.deps(),coverage=session.coverage(),
             cannot_establish=raw.get("cannot_establish") or (None if claims else "no_evidence"),snapshot=snapshot(ctx))
@@ -98,7 +108,8 @@ class Answers:
         for value in raw["results"]:
             if "candidate_digest" in value:raise DomainError("contract_violation")
             result=ReviewResult(**value,candidate_digest=digest)
-            if result.claim_id not in by_id or set(result.receipt_ids)!=set(by_id[result.claim_id].receipt_ids):raise DomainError("contract_violation")
+            if result.claim_id not in by_id or not set(result.receipt_ids)<=set(by_id[result.claim_id].receipt_ids):raise DomainError("contract_violation")
+            if result.verdict=="pass" and set(result.receipt_ids)!=set(by_id[result.claim_id].receipt_ids):raise DomainError("contract_violation")
             # A reviewer unable to read the discovered records cannot attest completeness.
             if session.coverage().state!="complete" and result.verdict=="pass":
                 result.verdict="fail";result.reason_code="incomplete_coverage";result.repair_request="Read missing source context within budget."
@@ -119,6 +130,10 @@ class Answers:
             if session.searches<session.round_limit:
                 await session.discover(input.question.text+" corrections replacements conditions")
         except BudgetExhausted:pass
+        if not session.spans:
+            # Empty canonical evidence has a fixed outcome. Do not ask a model to invent an answer-shaped claim.
+            self.traces.append({"phase":"answer","tools":session.trace})
+            return self._empty(ctx,"incomplete_coverage" if session.exhausted else "no_evidence",session.coverage())
         request={"question":input.question.text,"history":[h.model_dump(mode="json") for h in input.history]}
         try:
             raw=await self._agent("answer",session,request)
@@ -130,7 +145,8 @@ class Answers:
                 repair=ToolSession(self,ctx,self.limits,deadline,self.limits.repair_search_rounds)
                 # Reuse supplied evidence without resetting the initial phase budget; repair has its own caps.
                 repair.records=dict(session.records);repair.spans=dict(session.spans);repair.dependencies=dict(session.dependencies)
-                repair.results=list(session.results)
+                repair.results=list(session.results);repair.tokens=session.tokens
+                repair.pending_searches=set(session.pending_searches);repair.pending_histories=set(session.pending_histories)
                 try:await repair.discover(input.question.text+" "+" ".join(r.repair_request or "" for r in results if r.verdict=="fail"))
                 except BudgetExhausted:pass
                 raw=await self._agent("repair",repair,{**request,"failed_review":[r.model_dump(mode="json") for r in results],"prior_claims":[c.model_dump(mode="json") for c in payload.claims]})
