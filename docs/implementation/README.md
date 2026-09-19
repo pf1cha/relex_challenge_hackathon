@@ -2,7 +2,6 @@
 
 Status: delivery plan revision 4, 2026-09-19. Three people implement and test A, B and C concurrently. Policy defaults remain proposals; service contract revision 3 is unchanged. Read `architecture.md` for code layout and `independent-testing.md` for standalone acceptance.
 
-Authoritative workspace: `ssh verda`, `/mnt/relex-kai`. This document does not assert current implementation or staffing status.
 This plan does not rely on another checkout's code or delivery contract.
 
 ## Source authority and scope
