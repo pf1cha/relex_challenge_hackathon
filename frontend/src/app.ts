@@ -8,10 +8,15 @@ let registering=false;
 let me:Me|null=null, projects:Project[]=[], project:Project|null=null, view="documents";
 let conversation:string|null=null, pending:{question:string;conversation_id:string;request_id:string}|null=null;
 let questionDraft="", epoch=0, poll:number|undefined;
+const pageNames=["documents","search","chat","overview","visualization","administration"] as const;
 function el<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string,cls?:string):HTMLElementTagNameMap[K]{
  const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;
 }
 function button(text:string, action:()=>unknown, cls=""){const n=el("button",text,cls);n.onclick=()=>{Promise.resolve(action()).catch(showError)};return n;}
+function pagePath(name:string,projectId=project?.id){return projectId?"/#/projects/"+encodeURIComponent(projectId)+"/"+name:"/";}
+function navigate(name:string){view=name;history.pushState({view:name},"",pagePath(name));render();}
+function routeView(projectId:string){const match=location.hash.match(/^#\/projects\/([^/]+)\/([^/]+)$/);if(!match||decodeURIComponent(match[1])!==projectId)return "documents";return pageNames.includes(match[2] as typeof pageNames[number])?match[2]:"documents";}
+function pageLink(name:string,selected:boolean){const link=el("a",name[0].toUpperCase()+name.slice(1),selected?"selected":"");link.href=pagePath(name);link.setAttribute("aria-current",selected?"page":"false");link.onclick=event=>{if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate(name);};return link;}
 function input(label:string,type="text",value=""){const n=el("input");n.type=type;n.value=value;n.setAttribute("aria-label",label);n.placeholder=label;return n;}
 function select(label:string, values:[string,string][], value=""){const n=el("select");n.setAttribute("aria-label",label);for(const [v,t]of values){const o=el("option",t);o.value=v;n.append(o);}if(values.some(([v])=>v===value))n.value=value;return n;}
 function field(label:string,node:HTMLElement){const wrap=el("label",label);wrap.append(node);return wrap;}
@@ -34,21 +39,23 @@ async function list<T>(path:string){let items:T[]=[],cursor:string|null=null;do{
  }while(cursor);return items;}
 function reset(){epoch++;clearProject();conversation=null;pending=null;questionDraft="";if(poll)window.clearInterval(poll);document.querySelector("#receipt")?.remove();}
 function render(skipView=false){
- root.replaceChildren();const top=el("header");top.append(el("h1","Memory With a Receipt"));
- if(me){top.append(el("span",me.display_name));top.append(button("Sign out",async()=>{try{await api("/api/logout","POST");}finally{reset();clearSession();me=null;projects=[];project=null;render();}}));}
+ root.className="app-shell";root.replaceChildren();const top=el("header","","app-header");
+ const brand=el("div","","brand");brand.append(el("span","MR","brand-mark"));const brandCopy=el("div","","brand-copy");brandCopy.append(el("h1","Memory With a Receipt"),el("p","Evidence you can return to.","brand-tagline"));brand.append(brandCopy);top.append(brand);
+ if(me){const account=el("div","","account");account.append(el("span",me.display_name,"account-name"));account.append(button("Sign out",async()=>{try{await api("/api/logout","POST");}finally{reset();clearSession();me=null;projects=[];project=null;render();}},"button-quiet"));top.append(account);}
  root.append(top);const notice=el("div");notice.id="notice";notice.setAttribute("role","alert");root.append(notice);const barrier=el("div");barrier.id="barrier";barrier.setAttribute("role","status");root.append(barrier);
  if(!me){login();return;}
- const picker=select("Project",projects.map(p=>[p.id,p.name+" · "+p.role]),project?.id||"");
- picker.onchange=()=>{reset();project=projects.find(p=>p.id===picker.value)||null;history.replaceState(null,"","/");render();};
- root.append(field("Project",picker));
+ const workspace=el("section","","workspace-bar");const workspaceLabel=el("div","","workspace-label");workspaceLabel.append(el("span","CURRENT WORKSPACE","eyebrow"),el("strong",project?.name||"Choose a workspace"));workspace.append(workspaceLabel);
+ const picker=select("Project",projects.map(p=>[p.id,p.name+" · "+p.role]),project?.id||"");picker.className="project-select";
+ picker.onchange=()=>{reset();project=projects.find(p=>p.id===picker.value)||null;view="documents";history.pushState({view},"",pagePath(view,project?.id));render();};
+ workspace.append(field("Project",picker));root.append(workspace);
  if(!project){root.append(el("p","No project access has been assigned to this account. Share your account ID with a project administrator: "+me.user_id));return;}
- const nav=el("nav");
- for(const name of ["documents","search","chat","overview","visualization",...(project.role==="admin"?["administration"]:[])])
- nav.append(button(name[0].toUpperCase()+name.slice(1),()=>{view=name;render();},view===name?"selected":""));
- root.append(nav);const main=el("main");main.id="content";root.append(main);if(!skipView)renderView();
+ const nav=el("nav","","primary-nav");nav.setAttribute("aria-label","Primary navigation");
+ for(const name of ["documents","search","chat","overview","visualization",...(project.role==="admin"?["administration"]:[])])nav.append(pageLink(name,view===name));
+ root.append(nav);const main=el("main","","content-panel");main.id="content";root.append(main);if(!skipView)renderView();
 }
 function login(){
- const form=el("form"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
+ const intro=el("section","","auth-intro");intro.append(el("span","PRIVATE KNOWLEDGE, MADE USEFUL","eyebrow"),el("h2",registering?"Create your evidence workspace":"Welcome back"),el("p",registering?"Start a private place for answers that can always show their work.":"Sign in to continue working with your project evidence."));root.append(intro);
+ const form=el("form","","auth-form"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
  email.autocomplete="username";email.required=true;email.maxLength=320;
  password.autocomplete=registering?"new-password":"current-password";password.required=true;password.maxLength=4096;
  name.autocomplete="name";name.required=true;name.maxLength=255;
@@ -60,10 +67,12 @@ function login(){
  email:email.value.trim(),password:password.value,...(registering?{display_name:name.value.trim()}:{})});
  password.value="";registering=false;setCsrf(me.csrf_token);await loadProjects();
  }catch(e){showError(e);}finally{submit.disabled=false;}};
- root.append(form,button(registering?"Back to sign in":"Register",()=>{registering=!registering;render();}));
+ root.append(form,button(registering?"Back to sign in":"Register",()=>{registering=!registering;render();},"button-link"));
 }
 async function loadProjects(){projects=await list<Project>("/api/projects");const source=location.pathname.match(/^\/projects\/([^/]+)\/sources\/([^/]+)$/);
- project=(source?projects.find(p=>p.id===decodeURIComponent(source[1])):projects[0])||null;render(!!source);
+ const routeProject=location.hash.match(/^#\/projects\/([^/]+)(?:\/|$)/);
+ project=(source?projects.find(p=>p.id===decodeURIComponent(source[1])):routeProject?projects.find(p=>p.id===decodeURIComponent(routeProject[1])):projects[0])||null;
+ if(project&&!source){view=routeView(project.id);if(view==="administration"&&project.role!=="admin")view="documents";}render(!!source);
  if(source){if(!project){showError(new Error("This project is unavailable."));return;}const query=new URLSearchParams(location.search);
  await sourceView(decodeURIComponent(source[2]),Number(query.get("version")),query.get("span")||"");}}
 async function renderView(){if(poll){clearInterval(poll);poll=undefined;}document.querySelector("#receipt")?.remove();const main=root.querySelector<HTMLElement>("#content");if(!main)return;const mark=++epoch;main.replaceChildren(el("p","Loading…"));
@@ -172,4 +181,6 @@ async function administration(main:HTMLElement,mark:number){main.replaceChildren
  form.append(id,name,kind,contactKind,contact,add);form.onsubmit=async e=>{e.preventDefault();try{await api(base()+"/people","POST",{...(id.value?{person_id:id.value}:{}),display_name:name.value,kind:kind.value,contacts:contact.value?[{kind:contactKind.value,value:contact.value}]:[]});renderView();}catch(e){showError(e);}};main.append(form);await refreshJobs(main,mark);
 }
 async function start(){try{me=await api<Me>("/api/me");setCsrf(me.csrf_token);await loadProjects();}catch{me=null;render();}}
+window.addEventListener("popstate",()=>{if(me){if(project)view=routeView(project.id);render();}});
+window.addEventListener("hashchange",()=>{if(me){if(project)view=routeView(project.id);render();}});
 start();
