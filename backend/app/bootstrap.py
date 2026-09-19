@@ -46,8 +46,11 @@ def build_runtime(settings: RuntimeSettings | None = None) -> Runtime:
         api_key=settings.model_key,embedding_base_url=settings.embedding_url,
         embedding_model=settings.embedding_model,embedding_api_key=settings.embedding_key,
         timeout_seconds=min(120,settings.http.request_timeout_seconds)))
+    privacy_provider=ModelProvider(ProviderSettings(base_url=settings.privacy_model_url,
+        model=settings.privacy_model_name,api_key=settings.privacy_model_key,
+        timeout_seconds=min(120,settings.http.request_timeout_seconds)))
     index=QdrantIndex(settings.qdrant_url,settings.collection,settings.qdrant_key)
-    evidence.privacy_agent = PrivacyAgent(provider)
+    evidence.privacy_agent = PrivacyAgent(privacy_provider)
     limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=3,
         reviewer_search_rounds=3,tool_calls_per_phase=int(os.environ.get("RELEX_TOOL_CALLS_PER_PHASE","24")),
         pages_per_phase=int(os.environ.get("RELEX_PAGES_PER_PHASE","24")),

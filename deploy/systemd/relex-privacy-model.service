@@ -1,0 +1,16 @@
+[Unit]
+Description=Relex local privacy model
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/relex-kai
+Environment=HF_HOME=/mnt/relex-kai/.runtime/huggingface
+ExecStart=/mnt/relex-kai/.venv-privacy/bin/vllm serve Qwen/Qwen2.5-7B-Instruct --served-model-name Qwen2.5-7B-Instruct --host 127.0.0.1 --port 8001 --api-key local --max-model-len 32768 --gpu-memory-utilization 0.75
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

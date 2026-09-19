@@ -31,6 +31,9 @@ class RuntimeSettings:
     model_url: str = ""
     model_name: str = ""
     model_key: str = field(repr=False, default="")
+    privacy_model_url: str = ""
+    privacy_model_name: str = ""
+    privacy_model_key: str = field(repr=False, default="")
     embedding_url: str = ""
     embedding_model: str = ""
     embedding_key: str = field(repr=False, default="")
@@ -43,6 +46,9 @@ class RuntimeSettings:
         if len(secret) < 32:
             raise ValueError("RELEX_SESSION_SECRET requires at least 32 characters")
         loopback = e.get("RELEX_LOOPBACK_HTTP") == "1"
+        model_url = e.get("RELEX_MODEL_BASE_URL", "https://api.openai.com/v1")
+        model_name = e.get("RELEX_MODEL_NAME", "")
+        model_key = e.get("RELEX_MODEL_API_KEY") or e.get("OPENAI_API_KEY", "")
         return cls(
             http=HttpSettings(tuple(e.get("RELEX_TRUSTED_ORIGINS", "http://127.0.0.1:18080").split(",")),
                 not loopback, loopback, int(e.get("RELEX_UPLOAD_LIMIT_BYTES", "10485760")),
@@ -52,9 +58,12 @@ class RuntimeSettings:
             restricted_database_url=e.get("RELEX_RESTRICTED_DATABASE_URL", ""),
             qdrant_url=e.get("RELEX_QDRANT_URL", ""), qdrant_key=e.get("RELEX_QDRANT_API_KEY", ""),
             collection=e.get("RELEX_QDRANT_COLLECTION", "relex"),
-            model_url=e.get("RELEX_MODEL_BASE_URL", "https://api.openai.com/v1"),
-            model_name=e.get("RELEX_MODEL_NAME", ""),
-            model_key=e.get("RELEX_MODEL_API_KEY") or e.get("OPENAI_API_KEY", ""),
+            model_url=model_url,
+            model_name=model_name,
+            model_key=model_key,
+            privacy_model_url=e.get("RELEX_PRIVACY_MODEL_BASE_URL") or model_url,
+            privacy_model_name=e.get("RELEX_PRIVACY_MODEL_NAME") or model_name,
+            privacy_model_key=e.get("RELEX_PRIVACY_MODEL_API_KEY") or model_key,
             embedding_url=e.get("RELEX_EMBEDDING_BASE_URL", "https://api.openai.com/v1"),
             embedding_model=e.get("RELEX_EMBEDDING_MODEL", ""),
             embedding_key=e.get("RELEX_EMBEDDING_API_KEY") or e.get("OPENAI_API_KEY", ""))

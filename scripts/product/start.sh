@@ -14,7 +14,7 @@ then runs HTTP and the durable worker together. Ctrl-C stops HTTP and the worker
 the local data stores remain available for the next start.
 
 Options:
-  --port PORT       HTTP port (default: RELEX_PORT or 18080)
+  --port PORT       HTTP port (default: RELEX_PORT or 18082)
   --no-build        Reuse the existing compiled frontend
   --no-migrate      Do not apply database migrations
   --prepare-only    Start/check stores, build and migrate, then exit
@@ -64,7 +64,7 @@ PY
 while IFS= read -r -d '' key && IFS= read -r -d '' value; do export "$key=$value"; done < "$config"
 rm -f -- "$config"; trap - EXIT
 
-export RELEX_PORT=${port_override:-${RELEX_PORT:-18080}}
+export RELEX_PORT=${port_override:-${RELEX_PORT:-18082}}
 export RELEX_HOST=${RELEX_HOST:-127.0.0.1}
 export RELEX_DATABASE_URL=${RELEX_DATABASE_URL:-postgresql://relex_dev@127.0.0.1:15432/postgres}
 export RELEX_DATABASE_SCHEMA=${RELEX_DATABASE_SCHEMA:-manual_demo}
