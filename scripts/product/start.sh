@@ -123,14 +123,24 @@ import os, socket
 from app.config import RuntimeSettings
 settings=RuntimeSettings.from_env();port_text=os.environ["RELEX_PORT"]
 if not port_text.isascii() or not port_text.isdecimal() or not 1 <= int(port_text) <= 65535:
-    raise SystemExit("RELEX_PORT must be an integer from 1 to 65535")
-port=int(port_text);host=os.environ["RELEX_HOST"]
-if host not in ("127.0.0.1","localhost","::1") and settings.http.allow_loopback_http:
-    raise SystemExit("Non-loopback binding requires HTTPS origins and RELEX_LOOPBACK_HTTP=0")
-with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET) as probe:
-    try: probe.bind((host,port))
-    except OSError as exc: raise SystemExit(f"Cannot bind HTTP at {host}:{port}: {exc}") from None
-print("Configuration, frontend, migrations, PostgreSQL and Qdrant are ready.")
+    raise SystemExit('RELEX_PORT must be an integer from 1 to 65535')
+host = os.environ['RELEX_HOST']
+if host not in ('127.0.0.1', 'localhost', '::1') and settings.http.allow_loopback_http:
+    raise SystemExit('Non-loopback binding requires RELEX_LOOPBACK_HTTP=0 and HTTPS trusted origins')
+with socket.socket(socket.AF_INET6 if ':' in host else socket.AF_INET) as probe:
+    # Match Uvicorn so a just-stopped listener in TIME_WAIT does not block restart.
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind((host, int(port_text)))
+    except OSError as exc:
+        raise SystemExit(f'Cannot bind HTTP at {host}:{port_text}: {exc}') from None
+import psycopg, httpx
+with psycopg.connect(settings.database_url, connect_timeout=5) as connection:
+    connection.execute('SELECT 1')
+response = httpx.get(settings.qdrant_url.rstrip('/') + '/healthz',
+    headers={'api-key': settings.qdrant_key} if settings.qdrant_key else {}, timeout=5)
+response.raise_for_status()
+print('Configuration, HTTP port, PostgreSQL and Qdrant checks passed.')
 PY
 ((prepare_only)) && exit 0
 

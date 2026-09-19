@@ -2,6 +2,7 @@
 from __future__ import annotations
 import math
 import asyncio
+import json
 from datetime import datetime,timezone
 from app.contracts.models import *
 from app.contracts.errors import DomainError
@@ -17,6 +18,7 @@ class ToolSession:
         self.records={};self.spans={};self.dependencies={};self.results=[];self.trace=[]
         self.discovered_records=set();self.level2_records=set();self.source_records=set();self.source_searches=0
         self.exhausted=False;self.pending_searches=set();self.pending_histories=set()
+        self.completed_calls=set()
 
     def check(self):
         if datetime.now(timezone.utc)>=self.deadline:raise DomainError("provider_unavailable")
@@ -39,11 +41,14 @@ class ToolSession:
         except TimeoutError:raise DomainError("provider_unavailable") from None
 
     async def _call(self,name,args):
-        self.check();self.calls+=1
+        self.check()
         allowed={"search_memory":{"query","filters","cursor"},"search_sources":{"query","filters","cursor"},"read_record":{"record_id","cursor"},
           "read_memory":{"memory_id","record_id"},"get_decision_history":{"topic_id","scope","as_of","cursor"},
           "expand_context":{"record_id","span_id"}}
         if name not in allowed or not isinstance(args,dict) or set(args)-allowed[name]:raise DomainError("invalid_input")
+        call_key=json.dumps([name,args],sort_keys=True,separators=(",",":"),ensure_ascii=False)
+        if call_key in self.completed_calls:raise DomainError("invalid_input")
+        self.calls+=1
         if name=="search_memory":
             if self.searches>=self.round_limit:self.exhausted=True;raise BudgetExhausted()
             self.searches+=1
@@ -112,6 +117,7 @@ class ToolSession:
             self.spans.setdefault(key,{}).update({s.span_id:s for s in result.spans})
             self.dependencies.setdefault(key,set()).update(s.span_id for s in result.spans)
             trace_ids=[s.span_id for s in result.spans]
+        self.completed_calls.add(call_key)
         self.results.append({"tool":name,"result":result.model_dump(mode="json")})
         self.trace.append({"tool":name,"ids":trace_ids,"calls":self.calls,"pages":self.pages,"source_tokens_bound":self.tokens,"search_rounds":self.searches})
         return result
