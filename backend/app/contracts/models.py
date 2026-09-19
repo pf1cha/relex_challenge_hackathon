@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime, date, timezone
 from typing import Annotated, Generic, TypeVar, Literal, Union
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StrictBool, BeforeValidator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StrictBool, BeforeValidator, model_validator
 
 def _instant(v):
     if isinstance(v, str): v = datetime.fromisoformat(v.replace("Z", "+00:00"))
@@ -15,6 +15,26 @@ Instant = Annotated[datetime, BeforeValidator(_instant)]
 Date = date
 class DTO(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
+
+    @model_validator(mode="after")
+    def contract_constraints(self):
+        import re
+        for name, value in self.__dict__.items():
+            if isinstance(value, list) and (name.endswith("_ids") or name == "prior_event_ids"):
+                if len(value) != len(set(value)): raise ValueError("ID set contains duplicates")
+            if type(value) is int and value < 0: raise ValueError("negative count or offset")
+        if type(self).__name__ == "SourceTime":
+            patterns = {"year":r"\d{4}", "month":r"\d{4}-\d{2}", "day":r"\d{4}-\d{2}-\d{2}"}
+            if self.precision == "unknown":
+                if self.value is not None or self.timezone is not None: raise ValueError("unknown time has no value or zone")
+            elif self.value is None: raise ValueError("time value required")
+            elif self.precision == "instant": _instant(self.value)
+            else:
+                if not re.fullmatch(patterns[self.precision], self.value): raise ValueError("invalid date precision")
+                date.fromisoformat(self.value + {"year":"-01-01","month":"-01","day":""}[self.precision])
+        if type(self).__name__ == "SearchFilters" and self.date_from and self.date_to and self.date_from > self.date_to:
+            raise ValueError("inverted date range")
+        return self
 T=TypeVar("T")
 class PageRequest(DTO):
     cursor: str | None = None
@@ -340,7 +360,7 @@ class SearchFilters(DTO):
 class SearchInput(DTO):
     query: str
     filters: SearchFilters
-    page: Literal['PageRequest']
+    page: PageRequest
 
 class CandidateRef(DTO):
     entry_id: Id
