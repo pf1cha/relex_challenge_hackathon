@@ -22,7 +22,12 @@ Create private environment configuration from the documented keys in `.env.examp
 
 PostgreSQL is local to the backend host. Use a native PostgreSQL service/container with persistent storage and an application-owned database/role. Configure `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`; optional `RELEX_DATABASE_URL` supplies a native libpq connection string instead. `RELEX_DATABASE_SCHEMA` defaults to `relex`. HTTP and worker must use the same database/schema/secret. Migrations are explicit, not run per HTTP request.
 
-Use A's `scripts/evidence/` migration and account/project bootstrap commands. There are no default login credentials. Account creation and project creation are bootstrap operations; membership assignment never creates a login account.
+Export the same private database/schema/session configuration in your shell, then run the explicit migration and account/project bootstrap commands. The bootstrap password is prompted:
+```sh
+.venv/bin/python scripts/evidence/migrate.py
+RELEX_SECRET="$RELEX_SESSION_SECRET" .venv/bin/python scripts/evidence/bootstrap.py --email admin@example.test --display-name "Project admin" --project "My project"
+```
+There are no default login credentials. Account creation and project creation are bootstrap operations; membership assignment never creates a login account.
 
 Configure the authorized generation and embedding endpoints/model IDs, `RELEX_QDRANT_URL`, and an application-owned `RELEX_QDRANT_COLLECTION`. B discovers the embedding dimension from actual embeddings. Do not point development cleanup at somebody else's collection.
 

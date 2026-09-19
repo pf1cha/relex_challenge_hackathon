@@ -28,6 +28,7 @@ class Runtime:
     async def close(self):
         await self.provider.close()
         await self.index.close()
+        await self.evidence.db.close()
 
 def build_runtime(settings: RuntimeSettings | None = None) -> Runtime:
     from app.evidence.postgres import Postgres

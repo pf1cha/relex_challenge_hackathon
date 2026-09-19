@@ -9,6 +9,20 @@ async function request(method,route,body){return page.evaluate(async({method,rou
 async function job(id){for(let i=0;i<180;i++){const j=(await request("GET",base+"/jobs/"+id)).body;if(j.state==="completed")return j;if(j.state==="failed")throw new Error("Lifecycle job failed: "+j.kind+" "+j.error_code);await page.waitForTimeout(1000);}throw new Error("Lifecycle timed out");}
 try{
  await page.goto(process.env.RELEX_LIVE_URL);await page.getByLabel("Email",{exact:true}).fill(config.admin_email);await page.getByLabel("Password",{exact:true}).fill(config.password);await page.getByRole("button",{name:"Sign in",exact:true}).click();await page.getByRole("button",{name:"Sign out",exact:true}).waitFor();
+ await page.getByLabel("Text file",{exact:true}).setInputFiles("fixtures/implementation/pagination-report.txt");
+ await page.getByLabel("Record type",{exact:true}).selectOption("report");
+ const [upload]=await Promise.all([page.waitForResponse(r=>r.url().endsWith(base+"/documents")&&r.request().method()==="POST"),page.getByRole("button",{name:"Upload",exact:true}).click()]);
+ const paginationJob=await upload.json();await job(paginationJob.id);
+ const layoutDocument=(await request("GET",base+"/documents")).body.items.find(d=>d.latest_job_id===paginationJob.id);
+ const layoutRecord=(await request("GET",base+"/documents/"+layoutDocument.id+"/records")).body.items[0];
+ const layoutPage=(await request("GET",base+"/records/"+layoutRecord.record_id)).body;
+ await page.goto(process.env.RELEX_LIVE_URL+"/projects/"+config.project_id+"/sources/"+layoutRecord.record_id+"?version="+layoutRecord.record_version+"&span="+layoutPage.spans[0].span_id);
+ await page.locator("mark").first().waitFor();await page.getByRole("button",{name:"Next source page",exact:true}).click();
+ await page.getByRole("button",{name:"Previous source page",exact:true}).click();await page.locator("mark").first().waitFor();
+ result.cases.push("Actual long source viewer preserved blank spans, opened centered, paginated next and returned to highlighted location");
+ await page.goto(process.env.RELEX_LIVE_URL);await page.getByRole("button",{name:"Sign out",exact:true}).waitFor();
+ const layoutRow=page.locator("article").filter({hasText:layoutDocument.title}).first();page.once("dialog",d=>d.accept());
+ const [layoutDelete]=await Promise.all([page.waitForResponse(r=>r.url().endsWith("/documents/"+layoutDocument.id)&&r.request().method()==="DELETE"),layoutRow.getByRole("button",{name:"delete",exact:true}).click()]);await job((await layoutDelete.json()).id);
  await page.getByRole("button",{name:"Administration",exact:true}).click();
  await page.getByLabel("Existing user ID",{exact:true}).fill(config.outsider_id);
  await page.getByRole("button",{name:"Set membership",exact:true}).click();
