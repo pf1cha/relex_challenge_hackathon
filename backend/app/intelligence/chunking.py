@@ -21,6 +21,9 @@ def make_chunks(record, level1_id, level2_id, memories, *, max_chars=1800, overl
     for span in sorted(record.spans,key=lambda s:s.ordinal):
         start=0
         if not span.text:
+            if current and size+1>max_chars:
+                groups.append(current);current=[];size=0
+            current.append(SpanSlice(span_id=span.span_id,start=0,end=0));size+=1
             continue
         while start<len(span.text):
             end=min(len(span.text),start+max_chars)

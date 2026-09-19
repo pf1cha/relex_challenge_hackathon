@@ -20,7 +20,8 @@ def safe_contract(function):
         try:return await function(*args,**kwargs)
         except (DomainError,ValidationError,KeyError,TypeError,ValueError) as exc:
             error=exc if isinstance(exc,DomainError) else DomainError("contract_violation")
-            error.diagnostic={"handler":function.__name__,"frames":[{"file":frame.filename.rsplit("/",1)[-1],"line":frame.lineno} for frame in traceback.extract_tb(exc.__traceback__)],
+            previous=getattr(error,"diagnostic",{})
+            error.diagnostic={**previous,"handler":function.__name__,"frames":[{"file":frame.filename.rsplit("/",1)[-1],"line":frame.lineno} for frame in traceback.extract_tb(exc.__traceback__)],
                 "validation_types":[entry["type"] for entry in exc.errors()] if isinstance(exc,ValidationError) else []}
             raise error from None
     return guarded
@@ -33,13 +34,26 @@ def supported_time(raw):
 
 class Maintenance:
     async def _maintenance_generation(self,record):
-        try:
-            value=await self.provider.generate("maintenance",prompt("maintenance"),{"record":record.model_dump(mode="json")})
-        except ProviderFailure:raise DomainError("provider_unavailable") from None
-        if set(value)-{"description","summary","span_ids","topics","events"}:raise DomainError("contract_violation")
-        ids=value.get("span_ids",[]);known={s.span_id for s in record.spans}
-        if not ids or not set(ids)<=known or not isinstance(value.get("description"),str) or not isinstance(value.get("summary"),str):raise DomainError("contract_violation")
-        return value
+        known={s.span_id for s in record.spans}
+        payload={"record":record.model_dump(mode="json"),"allowed_span_ids":[s.span_id for s in record.spans]}
+        for attempt in range(2):
+            try:
+                value=await self.provider.generate("maintenance" if attempt==0 else "maintenance_schema_repair",prompt("maintenance"),payload)
+            except ProviderFailure:raise DomainError("provider_unavailable") from None
+            reason=None
+            if set(value)-{"description","summary","span_ids","topics","events"}:reason="unknown_fields"
+            elif not isinstance(value.get("description"),str):reason="description_type"
+            elif not isinstance(value.get("summary"),str):reason="summary_type"
+            elif not isinstance(value.get("span_ids"),list) or not value["span_ids"]:reason="empty_span_ids"
+            elif any(not isinstance(i,str) or i not in known for i in value["span_ids"]):reason="unknown_span_ids"
+            elif not isinstance(value.get("topics",[]),list) or not isinstance(value.get("events",[]),list):reason="metadata_type"
+            if reason is None:return value
+            # A malformed draft is never staged. One real provider formatting repair is visible in safe telemetry.
+            self.provider.events.append({"role":"maintenance_validation","reason_code":reason,"attempt":attempt+1})
+            payload={"record":record.model_dump(mode="json"),"allowed_span_ids":[s.span_id for s in record.spans],
+                "invalid_output":value,"validation_reason":reason,"instruction":"Repair JSON shape and source references using only supplied IDs. Do not add unsupported facts. Provide description and summary strings and at least one actual source span ID."}
+        error=DomainError("contract_violation");error.diagnostic={"handler":"maintenance_generation","reason_code":reason}
+        raise error
 
     @safe_contract
     async def process_record(self,cap,ref):

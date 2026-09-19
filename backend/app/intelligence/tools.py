@@ -95,6 +95,11 @@ class ToolSession:
     async def discover(self,query):
         hits=await self.call("search_memory",{"query":query})
         for hit in hits.items:
+            key=(hit.record.record_id,hit.record.record_version)
+            prior=self.records.get(key)
+            # A fresh scoped search revalidates eligibility; already supplied whole records need no duplicate source packet.
+            if prior and prior["start"] and prior["end"] and len(prior["chunks"])==prior["summary"].total_chunks:
+                continue
             cursor=None
             while True:
                 page=await self.call("read_record",{"record_id":hit.record.record_id,"cursor":cursor})

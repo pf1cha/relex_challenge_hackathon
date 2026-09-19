@@ -17,7 +17,7 @@ from app.intelligence.providers import ModelProvider,ProviderSettings
 from app.intelligence.qdrant import QdrantIndex
 
 async def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--run-id',required=True);parser.add_argument('--case',default='B-LONG');parser.add_argument('--followup',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--run-id',required=True);parser.add_argument('--case',default='B-LONG');parser.add_argument('--followup',action='store_true');parser.add_argument('--semantic-only',action='store_true');parser.add_argument('--bundle',action='store_true');parser.add_argument('--topics',action='store_true');parser.add_argument('--artifact-negative',action='store_true');args=parser.parse_args()
     import re
     if not re.fullmatch('[a-z][a-z0-9_]{0,35}',args.run_id):raise SystemExit('Invalid run ID')
     folder=Path('scripts/intelligence/runs')/args.run_id;original=json.loads((folder/'live.json').read_text());case=next(c for c in original['cases'] if c['id']==args.case);pid=case['project_id'];cfg={**dotenv_values('.env'),**os.environ}
@@ -45,6 +45,82 @@ async def main():
             turn=await p.begin_chat(ctx,ChatInput(question='So was October actually agreed, and is November accepted?',conversation_id=conversation_id,request_id=secrets.token_hex(16)))
             candidate=await service.answer(ctx,turn.input);answer=await p.release_answer(ctx,turn.attempt,candidate)
             result.update(old_answer_invalidated=True,normalized_history=[h.model_dump(mode='json') for h in turn.input.history],answer=answer.model_dump(mode='json'))
+        elif args.artifact_negative:
+            class InvalidSpan:
+                def __init__(self,real):self.real=real;self.injected=False
+                def __getattr__(self,name):return getattr(self.real,name)
+                async def stage_artifacts(self,cap,key,batch):
+                    if batch.chunks and not self.injected:
+                        self.injected=True;batch=batch.model_copy(deep=True)
+                        batch.chunks[0].slices[0].span_id='deliberately-invalid-synthetic-span'
+                    return await self.real.stage_artifacts(cap,key,batch)
+            faulty=InvalidSpan(p.artifacts);service.artifacts=faulty
+            job=await p.submit_upload(ctx,UploadInput(filename='invalid-artifact-probe.txt',record_type='report',content=b'Date: 2026-09-19\nThe equipment inspection is proposed. Approval is not recorded.'))
+            for _ in range(30):
+                await run_once(p,service,'b-invalid-span');ctx=await p.authorize(principal,pid);status=await p.get_job(ctx,job.id)
+                if status.state in ['completed','failed']:break
+            assert faulty.injected and status.state=='failed' and status.error_code=='contract_violation'
+            result['real_generated_artifact_invalid_span_rejected']=status.model_dump(mode='json')
+            class UnsupportedOverview:
+                def __init__(self,real):self.real=real;self.injected=False
+                def __getattr__(self,name):return getattr(self.real,name)
+                async def stage_artifacts(self,cap,key,batch):
+                    if any(memory.kind=='overview' for memory in batch.memories):
+                        self.injected=True;batch=batch.model_copy(deep=True)
+                        for memory in batch.memories:
+                            if memory.kind=='overview':memory.text+=' PERSON_Z approved a budget of 7000000 euros and owns the launch.'
+                    return await self.real.stage_artifacts(cap,key,batch)
+            fault=UnsupportedOverview(p.artifacts);service.artifacts=fault
+            job=await p.submit_upload(ctx,UploadInput(filename='overview-source-probe.txt',record_type='report',content=b'Date: 2026-09-19\nThe equipment inspection is proposed. Approval is not recorded.'))
+            for _ in range(40):
+                if not await run_once(p,service,'b-overview-negative'):break
+            ctx=await p.authorize(principal,pid);overview=await p.get_overview(ctx)
+            assert fault.injected
+            assert all('7000000' not in claim.text and 'PERSON_Z' not in claim.text for claim in overview.claims)
+            if overview.state!='ready':assert not overview.claims and not overview.receipts
+            result['unsupported_overview_clause_withheld']=overview.model_dump(mode='json')
+            result['fault_injection']='Mutated only an actual real-model artifact before real A staging; no fake repository/model/index responses. Actual final draft/reviewer and release remained active.'
+        elif args.semantic_only:
+            query='Has authorization crystallized?'
+            lexical=await p.retrieval.lexical_candidates(ctx,query,SearchFilters(),100)
+            assert not lexical
+            found=await service.search_memory(ctx,SearchInput(query=query,filters=SearchFilters(),page=PageRequest(limit=100)))
+            assert case['search']['items'][0]['record']['record_id'] in [hit.record.record_id for hit in found.items]
+            result['semantic_only_record_ids']=[hit.record.record_id for hit in found.items]
+            result['lexical_candidate_count']=len(lexical)
+        elif args.bundle:
+            content=b'From: PERSON_synthetic\nDate: 2026-09-01\nSubject: BUNDLE_FIRST_SENTINEL\nOctober is a proposal, not an agreement.\n-----\nFrom: PERSON_synthetic\nDate: 2026-09-02\nSubject: BUNDLE_SECOND_SENTINEL\nThe warehouse badge was approved.'
+            job=await p.submit_upload(ctx,UploadInput(filename='two-record-bundle.txt',record_type='email',content=content))
+            for _ in range(30):
+                await run_once(p,service,'b-bundle');ctx=await p.authorize(principal,pid);status=await p.get_job(ctx,job.id)
+                if status.state in ['completed','failed']:break
+            assert status.state=='completed',status.error_code
+            documents=await p.list_documents(ctx,PageRequest(limit=100));document=next(d for d in documents.items if d.latest_job_id==job.id)
+            records=await p.list_records(ctx,document.id,PageRequest(limit=100));assert len(records.items)==2
+            from app.intelligence.tools import ToolSession
+            for record in records.items:
+                session=ToolSession(service,ctx,limits,datetime.now(timezone.utc)+timedelta(seconds=180),3);cursor=None
+                while True:
+                    page=await session.call('read_record',{'record_id':record.record_id,'cursor':cursor});cursor=page.record_page.next_cursor
+                    if cursor is None:break
+                texts='\n'.join(span.text for spans in session.spans.values() for span in spans.values())
+                assert not ('BUNDLE_FIRST_SENTINEL' in texts and 'BUNDLE_SECOND_SENTINEL' in texts)
+                assert len(session.records)==1 and session.coverage().records[0].complete
+            result['selected_bundle_records_only']=[r.record_id for r in records.items]
+        elif args.topics:
+            before={mid:m['data'] for mid,m in state['memories'].items() if m['valid'] and m['data']['kind']=='topic'}
+            assert before
+            job=await p.submit_upload(ctx,UploadInput(filename='unrelated-badge.txt',record_type='report',content=b'Date: 2026-09-19\nThe unrelated warehouse security badge COLOR-92 was approved.'))
+            for _ in range(30):
+                if not await run_once(p,service,'b-unrelated'):break
+            ctx=await p.authorize(principal,pid)
+            same=[]
+            for mid,old in before.items():
+                current=await p.reader.read_memory(ctx,mid)
+                assert current.model_dump(mode='json')==old
+                same.append(mid)
+            result['unchanged_topic_artifacts']=same;result['overview']=(await p.get_overview(ctx)).model_dump(mode='json')
+            assert result['overview']['state']=='ready'
         else:
             rid=case['search']['items'][0]['record']['record_id']
             found=await index._call('POST',index.path+'/points/scroll',{'filter':{'must':[{'key':'project_id','match':{'value':pid}}]},'limit':100,'with_payload':True,'with_vector':True})
@@ -79,6 +155,6 @@ async def main():
         result['status']='FAIL';result['safe_error']=exc.code if isinstance(exc,DomainError) else type(exc).__name__
         raise
     finally:
-        (folder/('followup.json' if args.followup else 'retrieval-extra.json')).write_text(json.dumps(result,indent=2));await provider.close();await index.close()
-    print(json.dumps({'status':result['status'],'report':str(folder/('followup.json' if args.followup else 'retrieval-extra.json'))}))
+        (folder/('followup.json' if args.followup else 'artifact-negative.json' if args.artifact_negative else 'semantic-only.json' if args.semantic_only else 'bundle.json' if args.bundle else 'topics.json' if args.topics else 'retrieval-extra.json')).write_text(json.dumps(result,indent=2));await provider.close();await index.close()
+    print(json.dumps({'status':result['status'],'report':str(folder/('followup.json' if args.followup else 'artifact-negative.json' if args.artifact_negative else 'semantic-only.json' if args.semantic_only else 'bundle.json' if args.bundle else 'topics.json' if args.topics else 'retrieval-extra.json'))}))
 asyncio.run(main())
