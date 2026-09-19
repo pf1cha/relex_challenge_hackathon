@@ -13,7 +13,7 @@ from app.config import HttpSettings
 from app.contracts.models import *
 from app.contracts.ports import Services
 from app.contracts.errors import DomainError
-from app.api.schemas import LoginInput, RegisterInput, ConversationInput, MemberInput, SearchBody
+from app.api.schemas import LoginInput, RegisterInput, ConversationInput, MemberInput, SearchBody, PrivacyResolutionInput
 from app.api.errors import error_response
 
 def create_app(services: Services, settings: HttpSettings) -> FastAPI:
@@ -221,6 +221,12 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
         return await services.administration.associate_person(ctx,body)
     @app.post(base+"/people/{id}/erase",response_model=Job,status_code=202,dependencies=no_input)
     async def erase(id: Id,ctx=Depends(admin)): return await services.administration.erase_person(ctx,id)
+    @app.get(base+"/privacy/diagnostics",response_model=Page[PrivacyDiagnostic])
+    async def privacy_diagnostics(ctx=Depends(admin),paging=Depends(page)):
+        return await services.administration.list_privacy_diagnostics(ctx,paging)
+    @app.post(base+"/privacy/diagnostics/{id}/resolve",response_model=PrivacyDiagnostic,dependencies=[Depends(no_query)])
+    async def resolve_privacy(id: Id,body: PrivacyResolutionInput,ctx=Depends(admin)):
+        return await services.administration.resolve_privacy_diagnostic(ctx,id,body.resolution)
     @app.get(base+"/jobs",response_model=Page[Job])
     async def jobs(ctx=Depends(admin),paging=Depends(page)): return await services.administration.list_jobs(ctx,paging)
     @app.get(base+"/jobs/{id}",response_model=Job,dependencies=[Depends(no_query)])

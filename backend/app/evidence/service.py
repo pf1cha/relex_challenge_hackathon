@@ -26,7 +26,7 @@ def password_hash(password, salt=None):
     salt=salt or secrets.token_hex(16)
     return salt+":"+hashlib.scrypt(password.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
 def fresh_state():
-    return dict(corpus_generation=0,privacy_generation=0,lifecycle_revision=0,reservation=0,write_barrier=False,members={},documents={},records={},people={},jobs={},memories={},chunks={},entries={},history={},checkpoints={},operations={},conversations={},messages={},attempts={},answers={},plans={},capabilities={},overview=None)
+    return dict(corpus_generation=0,privacy_generation=0,lifecycle_revision=0,reservation=0,write_barrier=False,members={},documents={},records={},people={},jobs={},memories={},chunks={},entries={},history={},checkpoints={},operations={},conversations={},messages={},attempts={},answers={},plans={},capabilities={},overview=None,privacy_plans={},privacy_diagnostics={},privacy_resolutions={})
 
 class EvidencePlatform:
     def __init__(self, db, secret, privacy_detector=None, upload_limit_bytes=10*1024*1024, request_deadline_seconds=120, lease_seconds=300):
@@ -378,6 +378,21 @@ class EvidencePlatform:
             view={"public":dict(s["jobs"][job_id]["public"])}
             self._recoverable_cleanup(view)
             return Job.model_validate(view["public"])
+    async def list_privacy_diagnostics(self,ctx,page):
+        async with self.transaction(ctx,admin=True) as (_,s):
+            items=[PrivacyDiagnostic.model_validate(x) for x in s.get("privacy_diagnostics",{}).values()]
+            return self._page(sorted(items,key=lambda x:(x.state,x.updated_at,x.id)),page,self._binding(ctx,s,"privacy-diagnostics"))
+
+    async def resolve_privacy_diagnostic(self,ctx,diagnostic_id,resolution):
+        require(1<=len(resolution)<=500,"invalid_input")
+        async with self.transaction(ctx,admin=True,write=True) as (_,s):
+            raw=s.get("privacy_diagnostics",{}).get(diagnostic_id); require(raw,"not_found")
+            raw.update(state="resolved",resolution=resolution,updated_at=iso())
+            plan=s.get("privacy_plans",{}).get(f"{raw['record_id']}:{raw['record_version']}")
+            if plan: plan["unresolved_reasons"]=[x for x in plan.get("unresolved_reasons",[]) if x!=raw["reason"]]
+            self._invalidate(s,privacy=True)
+            return PrivacyDiagnostic.model_validate(raw)
+
     async def retry_job(self,ctx,job_id):
         async with self.transaction(ctx,admin=True) as (_,s):
             require(job_id in s["jobs"],"not_found");j=s["jobs"][job_id];p=j["public"]

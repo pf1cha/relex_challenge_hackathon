@@ -31,3 +31,7 @@ class SearchBody(DTO):
         if self.filters.date_from and self.filters.date_to and self.filters.date_from > self.filters.date_to:
             raise ValueError("invalid date range")
         return self
+
+
+class PrivacyResolutionInput(DTO):
+    resolution: Annotated[str, Field(min_length=1, max_length=500)]

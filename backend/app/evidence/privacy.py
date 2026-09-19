@@ -1,5 +1,7 @@
 """Restricted identity resolution; never guesses between same-name people."""
-import re
+import re, hashlib
+from ..contracts.errors import DomainError
+from ..contracts.models import PrivacyPlan, PrivacyEntity, PrivacyEdit
 from ..contracts.models import NormalizedText
 EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 PHONE = re.compile(r"(?<!\w)\+\d[\d ()-]{7,}\d")
@@ -89,3 +91,49 @@ def person_occurs(record, person_id, people):
         if resolved.ambiguous and any(re.search(r"(?<!\w)"+re.escape(alias)+r"(?!\w)",text,re.I) for alias in aliases(person) if alias):
             return True
     return person_id in record.get("person_ids", [])
+
+
+class PrivacyAgent:
+    """Mandatory record-level semantic privacy stage backed by the configured model."""
+    policy_version = "privacy-r3"
+    prompt_version = "privacy-plan-v1"
+    def __init__(self, provider):
+        self.provider = provider
+    async def plan(self, project_id, record_id, record_version, spans, source_hash):
+        payload = {"record_id": record_id, "record_version": record_version,
+                   "source_hash": source_hash,
+                   "spans": [{"span_id": s["span_id"], "text": s["text"]} for s in spans]}
+        try:
+            result = await self.provider.generate("privacy",
+            "Classify every span. Return JSON with entities, edits, covered_span_ids, unresolved_reasons. "
+            "Use only source-bound ranges; preserve operational facts and uncertainty. Never invent dates.",
+                payload, max_tokens=8192)
+        except Exception:
+            raise DomainError("provider_unavailable") from None
+        try:
+            plan = PrivacyPlan(plan_id=str(__import__("uuid").uuid4()), project_id=project_id,
+                record_id=record_id, record_version=record_version, source_hash=source_hash,
+                policy_version=self.policy_version, prompt_version=self.prompt_version,
+                entities=[PrivacyEntity.model_validate(x) for x in result.get("entities", [])],
+                edits=[PrivacyEdit.model_validate(x) for x in result.get("edits", [])],
+                covered_span_ids=list(result.get("covered_span_ids", [])),
+                unresolved_reasons=list(result.get("unresolved_reasons", [])),
+                complete=bool(result.get("complete", False)))
+        except Exception:
+            raise DomainError("provider_unavailable") from None
+        by_id={s["span_id"]:s for s in spans}
+        if set(plan.covered_span_ids) != set(by_id) or not plan.complete:
+            raise DomainError("privacy_unresolved")
+        occupied={}
+        for edit in sorted(plan.edits, key=lambda x:(x.span_id,x.start,x.end)):
+            span=by_id.get(edit.span_id)
+            if not span or edit.start < 0 or edit.end <= edit.start or edit.end > len(span["text"]):
+                raise DomainError("privacy_unresolved")
+            if edit.span_id in occupied and edit.start < occupied[edit.span_id]:
+                raise DomainError("privacy_unresolved")
+            occupied[edit.span_id]=edit.end
+        for entity in plan.entities:
+            span=by_id.get(entity.span_id)
+            if not span or entity.start < 0 or entity.end <= entity.start or entity.end > len(span["text"]):
+                raise DomainError("privacy_unresolved")
+        return plan

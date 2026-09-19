@@ -601,6 +601,48 @@ class PrivacyDetectionResult(DTO):
     detections: list[Detection]
     unresolved: StrictBool
 
+PrivacyEntityKind = Literal['person', 'organization', 'role', 'contact', 'personal_identifier', 'contextual_circumstance', 'uncertain']
+class PrivacyEntity(DTO):
+    span_id: Id
+    start: StrictInt
+    end: StrictInt
+    kind: PrivacyEntityKind
+    identity_hint: str | None = None
+    evidence_span_ids: list[Id] = []
+    confidence: Literal['certain', 'uncertain']
+
+class PrivacyEdit(DTO):
+    span_id: Id
+    start: StrictInt
+    end: StrictInt
+    replacement: str
+    reason: Literal['identity', 'contact', 'private_cause', 'personal_identifier', 'contextual_risk']
+
+class PrivacyPlan(DTO):
+    plan_id: Id
+    project_id: Id
+    record_id: Id
+    record_version: Version
+    source_hash: Digest
+    policy_version: str
+    prompt_version: str
+    entities: list[PrivacyEntity]
+    edits: list[PrivacyEdit]
+    covered_span_ids: list[Id]
+    unresolved_reasons: list[str]
+    complete: StrictBool
+
+class PrivacyDiagnostic(DTO):
+    id: Id
+    record_id: Id
+    record_version: Version
+    span_id: Id
+    kind: PrivacyEntityKind
+    reason: str
+    state: Literal['open', 'resolved']
+    resolution: str | None = None
+    updated_at: Instant
+
 ReadContext = RequestContext | WorkReadContext
 class BeginChatReady(DTO):
     state: Literal["ready"] = "ready"

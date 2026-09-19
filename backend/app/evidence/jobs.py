@@ -184,6 +184,11 @@ class Jobs:
                 for pid in j["work"]["person_ids"]:
                     require(not any(person_occurs(r,pid,s["people"]) for r in s["records"].values()),"contract_violation")
                     s["people"].pop(pid,None)
+                affected={r["record_id"] for r in s["records"].values() if r.get("original_doc_id") in j["work"]["document_ids"]}
+                for key,plan in list(s.get("privacy_plans",{}).items()):
+                    if plan.get("record_id") in affected: s["privacy_plans"].pop(key,None)
+                for key,diagnostic in list(s.get("privacy_diagnostics",{}).items()):
+                    if diagnostic.get("record_id") in affected: s["privacy_diagnostics"].pop(key,None)
                 s["write_barrier"]=False
             j["public"].update(state="completed",stage=seq[-1],error_code=None,retryable=False,updated_at=iso())
             j["lease_token"]=None;j["expires_at"]=None
@@ -198,61 +203,52 @@ class Jobs:
         return await self._mutate(lease,apply)
 
     async def prepare_ingestion(self,lease):
-        detected = {}
-        if lease.job.stage == "parsed" and self.p.privacy_detector is not None:
-            def read_private(s,j):
-                return [(ref["record_id"],s["records"][ref["record_id"]]["raw_spans"]) for ref in j["work"]["record_versions"]]
-            private_records = await self._mutate(lease,read_private)
-            for rid,spans in private_records:
-                for span in spans:
-                    result = await self.p.privacy_detector.detect(PrivacyDetectionInput(project_id=lease.job.project_id,record_id=rid,text=span["text"]))
-                    text=span["text"];uncertain=result.unresolved;last=0;names=[]
-                    changes=[]
-                    for detection in sorted(result.detections,key=lambda x:x.start):
-                        require(last<=detection.start<detection.end<=len(text))
-                        last=detection.end
-                        if detection.confidence=="uncertain":uncertain=True
-                        if detection.kind in ("postal_address","private_discussion"):
-                            changes.append((detection.start,detection.end,"[private context removed]"))
-                        elif detection.kind=="name":names.append(text[detection.start:detection.end])
-                    for start,end,replacement in reversed(changes):text=text[:start]+replacement+text[end:]
-                    detected[span["span_id"]]=(text,uncertain,names)
+        if lease.job.stage == "parsed":
+            snapshot = await self._mutate(lease, lambda s,j: [(s["records"][ref["record_id"]], s.get("privacy_plans",{}).get(f"{ref['record_id']}:{ref['record_version']}")) for ref in j["work"]["record_versions"]])
+            agent=getattr(self.p, "privacy_agent", None)
+            if agent is None: raise DomainError("provider_unavailable")
+            plans=[]
+            for record,saved in snapshot:
+                if saved and saved.get("source_hash")==record["source_hash"] and saved.get("complete"):
+                    plans.append(PrivacyPlan.model_validate(saved))
+                else:
+                    plans.append(await agent.plan(lease.job.project_id,record["record_id"],record["record_version"],record["raw_spans"],record["source_hash"]))
+            def persist(s,j):
+                for plan in plans:
+                    s.setdefault("privacy_plans",{})[f"{plan.record_id}:{plan.record_version}"]=dump(plan)
+                    for reason in plan.unresolved_reasons:
+                        diagnostic=PrivacyDiagnostic(id=uid(),record_id=plan.record_id,record_version=plan.record_version,span_id=plan.covered_span_ids[0],kind="uncertain",reason=reason,state="open",updated_at=now())
+                        s.setdefault("privacy_diagnostics",{})[diagnostic.id]=dump(diagnostic)
+                return self._lease(j)
+            await self._mutate(lease,persist)
         def apply(s,j):
             stage=j["public"]["stage"]
             if stage=="received":
                 refs=[]
                 for did in j["work"]["document_ids"]:
-                    d=s["documents"][did];parsed=parse(d["raw"],d["record_type"])
+                    d=s["documents"][did]; parsed=parse(d["raw"],d["record_type"])
                     for spans,time,source_hash in parsed:
-                        rid=uid();duplicate=next((r["duplicate_of"] or r["record_id"] for r in s["records"].values() if r.get("source_hash")==source_hash),None)
+                        rid=uid(); duplicate=next((r["duplicate_of"] or r["record_id"] for r in s["records"].values() if r.get("source_hash")==source_hash),None)
                         r=dict(project_id=j["public"]["project_id"],original_doc_id=did,record_id=rid,record_version=1,record_type=d["record_type"],title=d["title"],source_time=dump(time),spans=[dump(sp) for sp in spans],person_ids=[],duplicate_of=duplicate,published=False,quarantined=True,chunk_ids=[],entry_ids=[],source_hash=source_hash,created_at=iso(),raw_spans=[dump(sp) for sp in spans])
-                        s["records"][rid]=r;refs.append(dump(RecordVersionRef(record_id=rid,record_version=1)))
+                        s["records"][rid]=r; refs.append(dump(RecordVersionRef(record_id=rid,record_version=1)))
                     d["processing_state"]="running"
-                j["work"]["record_versions"]=refs;j["public"].update(stage="parsed",updated_at=iso())
-                return self._lease(j)
-            if j["public"]["stage"]=="parsed":
-                unresolved=False
+                j["work"]["record_versions"]=refs; j["public"].update(stage="parsed",updated_at=iso()); return self._lease(j)
+            if stage=="parsed":
                 for ref in j["work"]["record_versions"]:
-                    r=s["records"][ref["record_id"]];ids=set()
+                    r=s["records"][ref["record_id"]]; plan=s.get("privacy_plans",{}).get(f"{r['record_id']}:{r['record_version']}"); require(plan and plan.get("complete"),"privacy_unresolved")
+                    by_id={sp["span_id"]:sp for sp in r["raw_spans"]}; edits={}
+                    for edit in plan.get("edits",[]): edits.setdefault(edit["span_id"],[]).append((edit["start"],edit["end"],edit["replacement"]))
+                    ids=set()
                     for sp in r["raw_spans"]:
-                        detected_text,detected_uncertain,detected_names=detected.get(sp["span_id"],(sp["text"],False,[]))
-                        known_names={person["display_name"].casefold() for person in s["people"].values()}
-                        detected_uncertain |= any(name.casefold() not in known_names for name in detected_names)
-                        normalized=normalize(detected_text,s["people"],ingestion=True)
-                        unresolved|=detected_uncertain
-                        r["spans"][sp["ordinal"]]["text"]=normalized.text;ids.update(normalized.person_ids);unresolved|=normalized.ambiguous
-                    title=normalize(s["documents"][r["original_doc_id"]]["raw_filename"],s["people"],ingestion=True)
-                    r["title"]=title.text;ids.update(title.person_ids);unresolved|=title.ambiguous
-                    r["person_ids"]=sorted(ids);r["quarantined"]=unresolved
-                    s["documents"][r["original_doc_id"]]["title"]=r["title"]
-                if unresolved:
-                    j["public"].update(state="failed",error_code="privacy_unresolved",retryable=True,updated_at=iso())
-                    for did in j["work"]["document_ids"]:s["documents"][did]["processing_state"]="failed"
-                    return self._lease(j)
+                        text=sp["text"]
+                        for a,b,replacement in reversed(sorted(edits.get(sp["span_id"],[]))): text=text[:a]+replacement+text[b:]
+                        normalized=normalize(text,s["people"],ingestion=False); r["spans"][sp["ordinal"]]["text"]=normalized.text; ids.update(normalized.person_ids)
+                    r["person_ids"]=sorted(ids); r["quarantined"]=bool(plan.get("unresolved_reasons"))
+                if any(r["quarantined"] for r in (s["records"][x["record_id"]] for x in j["work"]["record_versions"])):
+                    j["public"].update(state="failed",error_code="privacy_unresolved",retryable=True,updated_at=iso()); return self._lease(j)
                 j["public"].update(stage="privacy_ready",updated_at=iso())
             return self._lease(j)
         return await self._mutate(lease,apply)
-
     async def prepare_cleanup(self,lease):
         def apply(s,j):
             kind=j["public"]["kind"]
