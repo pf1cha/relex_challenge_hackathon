@@ -64,13 +64,15 @@ def platform(state):
 
 @pytest.mark.asyncio
 async def test_timeline_exposes_both_summary_layers_and_processed_source_link():
+    timeline_record = record()
+    timeline_record["spans"] = [{"span_id": "unrelated-span"}, {"span_id": "span 1"}]
     state = {
         "corpus_generation": 3,
         "privacy_generation": 1,
         "documents": {
             "document-1": {"id": "document-1", "ai_status": "active", "deleted": False},
         },
-        "records": {"record-1": record()},
+        "records": {"record-1": timeline_record},
         "memories": {
             "memory-1": memory("memory-1", 1, "A short routing description."),
             "memory-2": memory("memory-2", 2, "A fuller evidence-backed summary."),
@@ -116,7 +118,27 @@ async def test_timeline_orders_known_source_times_and_keeps_unknown_dates_last()
 
 
 @pytest.mark.asyncio
-async def test_timeline_respects_record_visibility_for_members_and_admins():
+async def test_timeline_orders_instant_values_by_absolute_time_across_offsets():
+    state = {
+        "corpus_generation": 3,
+        "privacy_generation": 1,
+        "documents": {
+            "document-1": {"id": "document-1", "ai_status": "active", "deleted": False},
+        },
+        "records": {
+            "record-offset": record("record-offset", source_time={"value": "2026-09-19T10:00:00-05:00", "precision": "instant", "timezone": "America/Chicago"}),
+            "record-zulu": record("record-zulu", source_time={"value": "2026-09-19T14:30:00Z", "precision": "instant", "timezone": "UTC"}),
+        },
+        "memories": {},
+    }
+
+    page = await platform(state).get_timeline(context(), PageRequest(limit=100, cursor=None))
+
+    assert [item.record_id for item in page.items] == ["record-zulu", "record-offset"]
+
+
+@pytest.mark.asyncio
+async def test_timeline_excludes_inactive_and_unpublished_records_for_every_role():
     active = record("record-active", "document-active")
     inactive = record("record-inactive", "document-inactive")
     deleted = record("record-deleted", "document-deleted")
@@ -139,4 +161,4 @@ async def test_timeline_respects_record_visibility_for_members_and_admins():
     admin_page = await service.get_timeline(context("admin"), PageRequest(limit=100, cursor=None))
 
     assert [item.record_id for item in member_page.items] == ["record-active"]
-    assert [item.record_id for item in admin_page.items] == ["record-active", "record-inactive"]
+    assert [item.record_id for item in admin_page.items] == ["record-active"]

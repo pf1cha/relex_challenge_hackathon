@@ -1,6 +1,6 @@
 # HTTP API and browser contract
 
-Contract revision 5 — 2026-09-19. Public HTTP shapes remain unchanged from revision 4; the internal checkpoint contract is now revision 5. Read [shared-interfaces.md](shared-interfaces.md) for DTO fields, domain rules and service ownership. This document is a specification, not a claim that routes already exist. C implements these actual routes against injected service interfaces.
+Contract revision 6 — 2026-09-19. Revision 6 adds the public project timeline shape to revision 5's checkpoint contract. Read [shared-interfaces.md](shared-interfaces.md) for DTO fields, domain rules and service ownership. This document is a specification, not a claim that routes already exist. C implements these actual routes against injected service interfaces.
 
 The API in this document is the application's browser-facing API. PostgreSQL may run locally and A connects directly using the native database protocol; that does not remove these routes or expose database credentials to the browser. A/B service calls inside the backend remain in-process interfaces.
 
@@ -100,6 +100,7 @@ Re-fetch the owner-scoped receipt when opening its popover by hover, focus or ta
 | --- | --- | --- | --- |
 | GET `/api/projects/{p}/status` | No input | 200 `ProjectStatus` | `sources.get_status`; member/admin |
 | GET `/api/projects/{p}/overview` | No input | 200 `Overview` | `sources.get_overview`; member/admin |
+| GET `/api/projects/{p}/timeline` | Page query | 200 `Page<TimelineRecord>` | `sources.get_timeline`; member/admin; active records only |
 | GET `/api/projects/{p}/members` | Page query | 200 `Page<Member>` | `administration.list_members`; admin |
 | POST `/api/projects/{p}/members` | JSON `{user_id,role}` | 200 `Member` | `administration.set_member`; admin |
 | DELETE `/api/projects/{p}/members/{user_id}` | No body | 204 | `administration.remove_member`; admin |
@@ -116,7 +117,7 @@ Deleting a document or erasing a person requires a browser confirmation naming t
 
 The browser discovers jobs again after reload through the paginated admin job list. Pending/running/failed are distinct from completed. Show safe error codes and retry only when `retryable=true`. While `write_barrier=true`, show why uploads/identity/chat writes are temporarily unavailable; preserve unsent question text only in memory.
 
-`Overview.state=ready` exposes only reviewed claims/receipts; pending/failed/unavailable exposes empty arrays. Project status is eligible counts plus explicitly labeled operational status. Actual visualization content remains deferred.
+`Overview.state=ready` exposes only reviewed claims/receipts; pending/failed/unavailable exposes empty arrays. The separate timeline exposes explicitly labeled L1/L2 discovery summaries for current active records, never as reviewed claims, and links each record to processed canonical content at a summary dependency span. Project status is eligible counts plus explicitly labeled operational status. Broader aggregate visualization content remains deferred.
 
 ## 6. Browser fixture scenarios
 
@@ -136,7 +137,8 @@ C's test composition injects fixture services into the real `create_app`. Scenar
 | logout-during-chat | A refuses late release | Late response discarded; no stale claim display |
 | erasure-failure-retry | failed job, then resumed job | Correct target, failure and final completion state |
 | project-switch | Delayed response from previous project | Response discarded and project state cleared |
-| overview-pending | Empty claims with pending state | Status only, no raw summary |
+| overview-pending | Empty claims with pending state | No overview summary; the independently authorized record timeline may remain visible |
+| record-timeline | Four active records with distinct types, source times and L1/L2 summaries | Chronological horizontal cards, type colors, dependency-backed source links, scrolling and time-scale zoom |
 | no-memberships | Empty project list | App accessible; no project-derived data |
 
 Fixtures assist C's development only and do not verify product behavior. Real auth/SQL, live model/index services and the actual combined browser flows are required for acceptance.
@@ -145,4 +147,4 @@ Fixtures assist C's development only and do not verify product behavior. Real au
 
 C exports OpenAPI from these actual routes and shared DTOs using fixture composition, without production services. Generate frontend types/client from that export; do not hand-maintain competing evidence shapes. G0 fixes the generator command and checks generation drift.
 
-Validate [contract-examples.json](contract-examples.json) against response schemas, then run shared CT-01 through CT-17 plus the scenarios above. Tests must assert forbidden fields are absent: session/lease tokens, identity mappings, raw input, review reasoning, internal operation tickets and unreviewed candidates. Fixtures may expose only the same public DTOs as production routes.
+Validate [contract-examples.json](contract-examples.json) against response schemas, then run shared CT-01 through CT-18 plus the scenarios above. Tests must assert forbidden fields are absent: session/lease tokens, identity mappings, raw input, review reasoning, internal operation tickets and unreviewed candidates. Fixtures may expose only the same public DTOs as production routes.

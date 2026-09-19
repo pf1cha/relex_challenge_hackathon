@@ -1,8 +1,8 @@
 # Shared service interfaces
 
-Contract revision 5 — 2026-09-19. Specification for implementation in `/mnt/relex-kai`. This document defines the A/B/C boundaries; [http-api.md](http-api.md) defines their public HTTP projection. It does not claim these interfaces are already implemented.
+Contract revision 6 — 2026-09-19. Specification for implementation in `/mnt/relex-kai`. This document defines the A/B/C boundaries; [http-api.md](http-api.md) defines their public HTTP projection. It does not claim these interfaces are already implemented.
 
-Revision 5 adds durable staged-artifact reload and recovery semantics to revision 4. Revision 4 replaced the shorthand revision 3 signatures. It makes session authorization, chat reservations, pagination, staged artifacts, index-operation acknowledgement and fixture behavior explicit. Existing product requirements remain; the proposed role/privacy defaults in the implementation README remain proposals. A owns shared DTOs/protocols/errors; C owns HTTP schemas and composition. Changes to signatures or semantics require a contract revision and coordinated adapter updates.
+Revision 6 adds the project-scoped active-record timeline and its public DTO to revision 5. Revision 5 added durable staged-artifact reload and recovery semantics to revision 4. Revision 4 replaced the shorthand revision 3 signatures. It makes session authorization, chat reservations, pagination, staged artifacts, index-operation acknowledgement and fixture behavior explicit. Existing product requirements remain; the proposed role/privacy defaults in the implementation README remain proposals. A owns shared DTOs/protocols/errors; C owns HTTP schemas and composition. Changes to signatures or semantics require a contract revision and coordinated adapter updates.
 
 ## Verification policy: real services
 
@@ -251,6 +251,7 @@ SourceService.read_record(ctx, record_id: Id, page: PageRequest) -> RecordPage
 SourceService.read_source(ctx, request: SourceRequest) -> SourcePage
 SourceService.get_status(ctx) -> ProjectStatus
 SourceService.get_overview(ctx) -> Overview
+SourceService.get_timeline(ctx, page: PageRequest) -> Page<TimelineRecord>
 SourceService.get_filters(ctx) -> FilterOptions
 AdministrationService.list_members(ctx, page: PageRequest) -> Page<Member>
 AdministrationService.set_member(ctx, user_id: Id, role: Role) -> Member
@@ -264,6 +265,11 @@ AdministrationService.retry_job(ctx, job_id: Id) -> Job
 
 UploadInput {filename: string, record_type: RecordType, content: bytes}
 SourceRequest {record_id: Id, version: Version, span_id: Id, cursor?: string, limit?: integer}
+TimelineRecord {
+  project_id: Id, record_id: Id, original_doc_id: Id, record_version: Version,
+  title: string, record_type: RecordType, source_time: SourceTime,
+  level1_summary?: string, level2_summary?: string, processed_content_url?: string
+}
 PersonInput {
   person_id?: Id, display_name: string, kind: client | employee, contacts: Contact[]
 }
@@ -275,7 +281,7 @@ The upload is bounded by C before materializing bytes; A independently validates
 
 Source preview purpose is derived server-side: `read_record` always uses active answer evidence; `read_source` may allow current sanitized inactive content for admins. The public caller cannot specify purpose. The requested exact record version and span must resolve or return unavailable. Browser source pagination remains centered initially and uses source-bound cursors thereafter.
 
-Only ready, grounding-reviewed overview claims are returned. All other overview states have empty claims/receipts. Operational counts are null for members. Authorization changes may continue during an erasure barrier; uploads, associations, conversations/chat persistence and ordinary publication cannot.
+Only ready, grounding-reviewed overview claims are returned. All other overview states have empty claims/receipts. `TimelineRecord` is a separate discovery surface: it includes only published, non-quarantined records from active, non-deleted documents in the selected project. Its L1/L2 text is explicitly labeled routing/record-summary context, never a reviewed claim or answer evidence. The processed-content URL resolves the current record version at a valid summary dependency span. Timeline order normalizes source instants across offsets, places partial dates at their supported boundary, and retains unknown dates last. Operational counts are null for members. Authorization changes may continue during an erasure barrier; uploads, associations, conversations/chat persistence and ordinary publication cannot.
 
 ### Conversations, retry reservations and final release
 
@@ -627,13 +633,14 @@ This is the only optional cross-slice provider interface that may receive restri
 | CT-08 changed receipt | A returns 410, no old/new quote substitution | C clears popover and offers regeneration |
 | CT-09 unknown upsert outcome | A retains outstanding operation | B reports unknown; cleanup UI stays incomplete |
 | CT-10 late obsolete upsert | Ledger accepts outcome only, no publication | B removes point; A verifies before completion |
-| CT-11 overview pending | A returns empty claims/receipts | C renders status, no raw memory prose |
+| CT-11 overview pending | A returns empty claims/receipts | C renders status and no overview-memory prose; the separate record timeline follows CT-18 |
 | CT-12 model/reviewer unavailable | B raises provider_unavailable | C renders retryable failure |
 | CT-13 malformed artifact/span | A rejects staging/publication | B records failure, no silent partial success |
 | CT-14 fixture composition | C starts real routes with only contracts and fixture ports | Browser flows need no A/B runtime imports |
 | CT-15 same-name people | A keeps distinct identity IDs | B filters IDs; C's erase confirmation targets one ID |
 | CT-16 erasure barrier | A blocks upload/association/chat publication | C keeps unsent input only in memory and shows retry |
 | CT-17 staged restart | A durably saves/reloads the exact authorized batch | B resumes index work without regenerating checkpointed model outputs; obsolete checkpoints are rejected |
+| CT-18 record timeline | A returns only current active records with L1/L2 discovery summaries and dependency-backed source links | C renders a project-scoped chronological timeline; summaries are labeled as discovery context, not reviewed claims |
 
 Protocol conformance cases run against real producers and consumer substitutes using adapter factories. Source/record/model quality is tested in the owning slice; the whole pipeline is still verified through G1-G4. Any unresolved signature/type/state decision blocks G0 readiness and must be added here rather than invented independently.
 
@@ -660,7 +667,7 @@ Known differences remain explicit:
 - `user_ui.md` permits a Basic User to use chat without project rights. The app can display chat and an empty project selector, but this delivery plan only defines project-grounded chat endpoints. A general non-project chat service remains unspecified; do not grant implicit project access or claim this broader behavior complete.
 - Client/employee associations and project-local erasure are covered. Organization-wide deletion, global account/user discovery, project creation UI, custom role editing and cross-project association management are not silently added. Where the broad UI document expects these, they remain product-scope differences requiring reconciliation.
 - Members seeing only active sources, admins seeing sanitized inactive previews, opaque personnel labels, project-local admin erasure, UTF-8 initial formats and ingestion-time removal of private discussion are the delivery plan's existing provisional defaults. They are not recast as previously approved production requirements.
-- Actual project visualization content remains deferred. Status/overview endpoints support navigation and status only; they do not complete the visualization requirement.
+- Overview now includes the revision 6 active-record timeline. Broader aggregate visualization content beyond this record chronology and the existing status view remains deferred.
 - Integer pagination defaults, enum spellings, normalization, digest encoding, cookie/header names and port decomposition are interface decisions in revision 4. They preserve the behavior above; they do not establish model choice, new legal guarantees or a new deployment requirement.
 
 Do not label this contract fully compliant with every historical document while these source differences remain unresolved. Required production evidence/access/chronology/erasure invariants are preserved; broader product scope still needs an explicit decision.

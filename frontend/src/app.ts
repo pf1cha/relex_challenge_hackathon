@@ -184,11 +184,16 @@ async function chat(main:HTMLElement,mark:number){main.replaceChildren(pageHeade
  if(!pending)pending={question:question.value,conversation_id:conversation,request_id:crypto.randomUUID()};
  const answer=await api<Answer>(base()+"/chat","POST",pending);current(mark);processing.replaceWith(answerNode(answer));pending=null;questionDraft="";question.value="";send.textContent="Ask";
  }catch(e){processing.remove();showError(e);if(e instanceof ApiError&&(!e.retryable||["evidence_changed","answer_unavailable","idempotency_conflict"].includes(e.code)))pending=null;send.textContent=pending?"Retry question":"Ask";}finally{send.disabled=false;}};}
+function timelineTimestamp(time:Models["SourceTime"]){
+ if(!time.value)return null;
+ const normalized=time.precision==="year"?time.value+"-01-01T00:00:00Z":time.precision==="month"?time.value+"-01T00:00:00Z":time.precision==="day"?time.value+"T00:00:00Z":time.value;
+ const timestamp=Date.parse(normalized);return Number.isNaN(timestamp)?null:timestamp;
+}
 function timelineTimeLabel(time:Models["SourceTime"]){
  if(!time.value)return "Date unknown";
  if(time.precision==="year")return time.value;
- const normalized=time.precision==="month"?time.value+"-01T00:00:00Z":time.precision==="day"?time.value+"T00:00:00Z":time.value;
- const date=new Date(normalized);if(Number.isNaN(date.valueOf()))return time.value;
+ const timestamp=timelineTimestamp(time);if(timestamp===null)return time.value;
+ const date=new Date(timestamp);
  const options:Intl.DateTimeFormatOptions=time.precision==="month"?{month:"short",year:"numeric",timeZone:"UTC"}:time.precision==="day"?{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}:{day:"numeric",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",timeZoneName:"short"};
  return new Intl.DateTimeFormat(undefined,options).format(date);
 }
@@ -198,7 +203,10 @@ function timelineView(records:TimelineRecord[]){
  const controls=el("div","","timeline-controls"),viewport=el("div","","timeline-viewport"),track=el("ol","","timeline-track");viewport.tabIndex=0;viewport.setAttribute("aria-label","Project records timeline");viewport.append(track);
  const range=el("input");range.type="range";range.min="70";range.max="160";range.step="10";range.value="100";range.setAttribute("aria-label","Timeline zoom");
  const zoomLabel=el("output","100%","timeline-zoom-value");zoomLabel.htmlFor=range.id="timeline-zoom";
- let zoom=100;const applyZoom=(next:number)=>{zoom=Math.max(70,Math.min(160,next));range.value=String(zoom);zoomLabel.value=zoom+"%";track.style.setProperty("--timeline-card-width",Math.round(286*zoom/100)+"px");};
+ const timelineItems:HTMLElement[]=[];const timestamps=records.map(record=>timelineTimestamp(record.source_time));let zoom=100;
+ const layoutTimeline=()=>{const scale=zoom/100,cardWidth=Math.round(286*scale),minimumStep=cardWidth+Math.round(22*scale),known=timestamps.filter((value):value is number=>value!==null),minimum=known.length?Math.min(...known):0,maximum=known.length?Math.max(...known):0,span=maximum-minimum,temporalWidth=Math.max(minimumStep*Math.max(1,known.length-1)*1.45,760*scale);let previous=0;
+  track.style.setProperty("--timeline-card-width",cardWidth+"px");timelineItems.forEach((item,index)=>{const timestamp=timestamps[index],desired=timestamp!==null&&span>0?(timestamp-minimum)/span*temporalWidth:previous+minimumStep,position=index===0?0:Math.max(desired,previous+minimumStep);item.style.marginLeft=index===0?"0":Math.round(position-previous-cardWidth)+"px";previous=position;});};
+ const applyZoom=(next:number)=>{zoom=Math.max(70,Math.min(160,next));range.value=String(zoom);zoomLabel.value=zoom+"%";layoutTimeline();};
  const control=(symbol:string,label:string,action:()=>void)=>{const result=button(symbol,action,"timeline-icon");result.type="button";result.title=label;result.setAttribute("aria-label",label);return result;};
  controls.append(control("<","Scroll timeline left",()=>viewport.scrollBy({left:-viewport.clientWidth*.72,behavior:"smooth"})),control(">","Scroll timeline right",()=>viewport.scrollBy({left:viewport.clientWidth*.72,behavior:"smooth"})),control("-","Zoom out timeline",()=>applyZoom(zoom-10)),range,zoomLabel,control("+","Zoom in timeline",()=>applyZoom(zoom+10)));
  range.oninput=()=>applyZoom(Number(range.value));header.append(title,controls);section.append(header);
@@ -206,12 +214,12 @@ function timelineView(records:TimelineRecord[]){
  if(!records.length){section.append(emptyState("No processed records","This project has no timeline-ready records."));return section;}
  for(const record of records){const item=el("li","","timeline-item");item.dataset.recordType=record.record_type;item.append(el("time",timelineTimeLabel(record.source_time),"timeline-date"),el("span","","timeline-marker"));
   const card=el("article","","timeline-card"),meta=el("div","","card-meta");meta.append(el("span",record.record_type,"timeline-type"));card.append(meta,el("h4",record.title));
-  const layer1=el("section","","timeline-summary");layer1.append(el("span","Level 1 summary","timeline-summary-label"),el("p",record.level1_summary||"Summary pending."));
-  const layer2=el("section","","timeline-summary timeline-summary-secondary");layer2.append(el("span","Level 2 summary","timeline-summary-label"),el("p",record.level2_summary||"Summary pending."));card.append(layer1,layer2);
-  if(record.processed_content_url){const link=el("a","Open processed content","timeline-source-link");link.href=record.processed_content_url;link.target="_blank";link.rel="noopener";card.append(link);}item.append(card);track.append(item);
+  const layer1=el("section","","timeline-summary");layer1.append(el("span","Level 1 routing summary","timeline-summary-label"),el("p",record.level1_summary||"Summary pending."));
+  const layer2=el("section","","timeline-summary timeline-summary-secondary");layer2.append(el("span","Level 2 record summary","timeline-summary-label"),el("p",record.level2_summary||"Summary pending."));card.append(layer1,layer2);
+  if(record.processed_content_url){const link=el("a","Open processed content","timeline-source-link");link.href=record.processed_content_url;link.target="_blank";link.rel="noopener";card.append(link);}item.append(card);timelineItems.push(item);track.append(item);
  }
  section.append(viewport);
- viewport.addEventListener("wheel",event=>{if(Math.abs(event.deltaY)>Math.abs(event.deltaX)&&viewport.scrollWidth>viewport.clientWidth){viewport.scrollLeft+=event.deltaY;event.preventDefault();}},{passive:false});
+ viewport.addEventListener("wheel",event=>{const maximumScroll=viewport.scrollWidth-viewport.clientWidth,canScroll=event.deltaY<0?viewport.scrollLeft>0:viewport.scrollLeft<maximumScroll;if(Math.abs(event.deltaY)>Math.abs(event.deltaX)&&canScroll){viewport.scrollLeft+=event.deltaY;event.preventDefault();}},{passive:false});
  let dragStart:number|null=null,scrollStart=0;viewport.addEventListener("pointerdown",event=>{if(event.pointerType!=="mouse"||event.button!==0||(event.target as Element).closest("a,button,input"))return;dragStart=event.clientX;scrollStart=viewport.scrollLeft;viewport.setPointerCapture(event.pointerId);viewport.classList.add("is-dragging");});
  viewport.addEventListener("pointermove",event=>{if(dragStart!==null)viewport.scrollLeft=scrollStart-(event.clientX-dragStart);});const stopDrag=()=>{dragStart=null;viewport.classList.remove("is-dragging");};viewport.addEventListener("pointerup",stopDrag);viewport.addEventListener("pointercancel",stopDrag);
  viewport.onkeydown=event=>{if(event.key==="ArrowLeft"||event.key==="ArrowRight"){viewport.scrollBy({left:(event.key==="ArrowLeft"?-1:1)*viewport.clientWidth*.45,behavior:"smooth"});event.preventDefault();}};

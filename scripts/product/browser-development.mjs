@@ -17,11 +17,15 @@ try{
  const colors=await timeline.locator(".timeline-card").evaluateAll(cards=>cards.map(card=>getComputedStyle(card).borderTopColor));
  assert.equal(new Set(colors).size,4);
  const firstCard=timeline.locator(".timeline-card").first();
+ const secondCard=timeline.locator(".timeline-card").nth(1);
  const widthBefore=await firstCard.evaluate(card=>card.getBoundingClientRect().width);
+ const temporalGapBefore=await secondCard.evaluate((card,first)=>card.getBoundingClientRect().left-(first).getBoundingClientRect().right,await firstCard.elementHandle());
  await page.getByRole("button",{name:"Zoom in timeline"}).click();
  await page.waitForTimeout(250);
  const widthAfter=await firstCard.evaluate(card=>card.getBoundingClientRect().width);
+ const temporalGapAfter=await secondCard.evaluate((card,first)=>card.getBoundingClientRect().left-(first).getBoundingClientRect().right,await firstCard.elementHandle());
  assert(widthAfter>widthBefore);
+ assert(temporalGapAfter>temporalGapBefore);
  const viewport=timeline.locator(".timeline-viewport");
  await page.getByRole("button",{name:"Scroll timeline right"}).click();
  await page.waitForTimeout(350);

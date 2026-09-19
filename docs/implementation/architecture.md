@@ -1,6 +1,6 @@
 # Codebase architecture
 
-Delivery plan revision 4, 2026-09-19; service contract revision 5. Authoritative workspace: `/mnt/relex-kai` on `verda`. This is the implementation structure for the source behavior/agent docs, not a replacement for their requirements. Folder READMEs are scaffolding; application code is still to be implemented.
+Delivery plan revision 4, 2026-09-19; service contract revision 6. Authoritative workspace: `/mnt/relex-kai` on `verda`. This is the implementation structure for the source behavior/agent docs, not a replacement for their requirements. Folder READMEs are scaffolding; application code is still to be implemented.
 
 ## Verification policy: real services
 
@@ -84,7 +84,7 @@ relex-0919/
 
 File names inside modules are the target decomposition, not a requirement to create empty files. Start each module when its first slice needs it. Keep Python under the `app` package; avoid a top-level `platform` package that can shadow Python's standard library. Frontend framework/bundler is C's implementation choice; backend authorization and evidence semantics must not depend on that choice.
 
-Detailed DTOs and protocol signatures live in [shared-interfaces.md](shared-interfaces.md); public route contracts live in [http-api.md](http-api.md). They define contract revision 5 and supersede the older shorthand. Source-scope differences remain explicit in the shared contract.
+Detailed DTOs and protocol signatures live in [shared-interfaces.md](shared-interfaces.md); public route contracts live in [http-api.md](http-api.md). They define contract revision 6 and supersede the older shorthand. Source-scope differences remain explicit in the shared contract.
 
 ## Dependency direction and ownership
 
@@ -180,7 +180,7 @@ Frontend uses only authenticated HTTP APIs, never direct SQL/Qdrant/model access
 
 Development uses a same-origin proxy; deployment may serve compiled `frontend/dist/` from FastAPI. Static build assets contain no private configuration. Source routes render a frontend source page backed by a separately authorized canonical source API; the HTML shell itself contains no protected source text. Direct page loads and new-tab receipt links must work. Add a focused span lookup to the source API so deep links do not require fetching every prior page.
 
-Use no-store for sensitive responses, clear client state on logout/project changes, and re-fetch/revalidate receipts when opening them. Do not persist private answers/quotes in localStorage or service-worker caches. Displayed factual content comes only from reviewed claims; project overview excerpts retain their source references and rebuild status. Proposed UI-specific behavior does not settle the deferred visualization content.
+Use no-store for sensitive responses, clear client state on logout/project changes, and re-fetch/revalidate receipts when opening them. Do not persist private answers/quotes in localStorage or service-worker caches. Displayed answer and briefing claims come only from reviewed claims; project overview excerpts retain their source references and rebuild status. The record timeline may display explicitly labeled L1/L2 discovery summaries for active records, but those summaries are routing context rather than verified claims and link to their canonical dependency span. Broader aggregate visualization content remains deferred.
 
 ## Implementation acceptance
 

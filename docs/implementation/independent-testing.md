@@ -1,10 +1,10 @@
 # Parallel implementation and independent acceptance
 
-Delivery plan revision 4, 2026-09-19. Three people own A, B and C and implement/test concurrently. The authoritative workspace is `/mnt/relex-kai` on `verda`. Service contract revision 5 details the shared interfaces; product behavior requirements remain unchanged.
+Delivery plan revision 4, 2026-09-19. Three people own A, B and C and implement/test concurrently. The authoritative workspace is `/mnt/relex-kai` on `verda`. Service contract revision 6 details the shared interfaces; product behavior requirements remain unchanged.
 
 This is a delivery specification. Runners and starter artifacts below are required deliverables, not commands verified to exist today.
 
-Read [shared-interfaces.md](shared-interfaces.md), [http-api.md](http-api.md) and [contract-examples.json](contract-examples.json) as the exact baseline for G0. Shared cases CT-01 through CT-17 are specified there; C's browser scenarios are in the HTTP contract. Public examples may be checked against generated response schemas during development; this does not verify product behavior.
+Read [shared-interfaces.md](shared-interfaces.md), [http-api.md](http-api.md) and [contract-examples.json](contract-examples.json) as the exact baseline for G0. Shared cases CT-01 through CT-18 are specified there; C's browser scenarios are in the HTTP contract. Public examples may be checked against generated response schemas during development; this does not verify product behavior.
 
 ## Verification policy: real services
 
