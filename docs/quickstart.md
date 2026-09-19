@@ -1,4 +1,56 @@
-# Product verification quickstart (verda)
+# Product quickstart (verda)
+
+## Start HTTP and worker together
+
+For the existing configured demo, run on verda:
+
+```bash
+ssh verda
+cd /mnt/relex-kai
+bash scripts/product/start.sh
+```
+
+This starts both application processes in the foreground. Ctrl-C stops both.
+PostgreSQL and Qdrant must already be running. The launcher checks their
+connections and the HTTP port before starting; it does not create accounts.
+It automatically selects the installed Python environment, loads `.env`, and
+uses the saved `.runtime/manual/env.sh` secret if `.env`/your shell has none.
+For a first setup, follow **Manual browser demo** below to create the secret,
+migrate and bootstrap an account, then use the launcher instead of two processes.
+
+From another terminal on your **local computer**:
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -L 18080:127.0.0.1:18080 verda
+```
+
+Open http://127.0.0.1:18080 and sign in with your bootstrapped account.
+If port 18080 already has a running app, reuse it or choose another port:
+
+```bash
+RELEX_TRUSTED_ORIGINS=http://127.0.0.1:18082 \
+  bash scripts/product/start.sh --port 18082
+# Local terminal:
+ssh -N -o ExitOnForwardFailure=yes -L 18082:127.0.0.1:18082 verda
+```
+
+Open http://127.0.0.1:18082 for that example. Set trusted origins explicitly
+when changing ports if `.env` already defines an origin.
+
+Exported variables override `.env`; `.env` overrides launcher defaults.
+Configurable values include `RELEX_PORT`, `RELEX_HOST`, `RELEX_PYTHON`,
+`RELEX_ENV_FILE`, `RELEX_DATABASE_URL`, `RELEX_DATABASE_SCHEMA`,
+`RELEX_QDRANT_URL`, `RELEX_QDRANT_COLLECTION` and `RELEX_SESSION_SECRET`.
+Default services are the existing development PostgreSQL on 15432 and Qdrant
+on 16333; the default schema/collection is `manual_demo`. HTTP and worker
+inherit exactly the same configuration. Non-loopback binding requires HTTPS
+trusted origins, `RELEX_LOOPBACK_HTTP=0`, and an HTTPS reverse proxy.
+
+Use `--build` to install frontend dependencies and rebuild, `--migrate` to
+apply database migrations, or `--help` for all options. Neither operation runs
+by default. Backend dependencies must already be installed as described below.
+
+## Environment and verification details
 
 Conda (Miniforge) is installed at /mnt/relex-kai/.tools/miniforge3. The relex environment uses Python 3.12 with backend dependencies installed. Existing .env and virtual environments are preserved; shell startup files are unchanged.
 
