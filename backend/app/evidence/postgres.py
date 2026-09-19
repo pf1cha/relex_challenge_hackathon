@@ -2,7 +2,8 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 import re
-from psycopg import AsyncConnection, sql
+from psycopg import sql
+from psycopg_pool import AsyncConnectionPool
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
@@ -11,10 +12,15 @@ class Postgres:
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", schema):
             raise ValueError("invalid schema")
         self.dsn, self.schema = dsn, schema
+        self._pool = AsyncConnectionPool(conninfo=dsn,kwargs={"row_factory":dict_row},min_size=0,max_size=4,open=False)
+        self._opened = False
 
     @asynccontextmanager
     async def connection(self):
-        async with await AsyncConnection.connect(self.dsn, row_factory=dict_row) as conn:
+        if not self._opened:
+            await self._pool.open()
+            self._opened = True
+        async with self._pool.connection() as conn:
             await conn.execute(sql.SQL("SET search_path TO {}, public").format(sql.Identifier(self.schema)))
             yield conn
 
@@ -29,3 +35,8 @@ class Postgres:
         async with self.connection() as conn:
             row = await (await conn.execute("SELECT max(version) AS version FROM schema_migrations")).fetchone()
             return row["version"] == 1
+
+    async def close(self):
+        if self._opened:
+            await self._pool.close()
+            self._opened = False

@@ -304,9 +304,10 @@ class EvidencePlatform:
     async def mutate_document(self,ctx,document_id,action):
         require(action in ("activate","deactivate","delete"),"invalid_input")
         async with self.transaction(ctx,admin=True) as (_,s):
-            d=self._document(s,document_id);kind="delete_document" if action=="delete" else action
+            kind="delete_document" if action=="delete" else action
             existing=self._active_lifecycle(s,kind,document_id)
             if existing:return existing
+            d=self._document(s,document_id)
             require(not s["write_barrier"],"write_barrier")
             if action=="activate":d["ai_status"]="active"
             else:d["ai_status"]="inactive"
@@ -631,6 +632,7 @@ class EvidencePlatform:
             # Coverage intervals must account for every source character, including blank spans.
             r=s["records"][decoded[1]]
             for span in r["spans"]:
+                if not span["text"]: continue
                 intervals=sorted((sl.start,sl.end) for ch in batch.chunks for sl in ch.slices if sl.span_id==span["span_id"])
                 require(intervals);covered=0
                 for start,end in intervals:require(start<=covered);covered=max(covered,end)

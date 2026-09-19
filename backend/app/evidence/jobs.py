@@ -160,7 +160,7 @@ class Jobs:
             for rid,spans in private_records:
                 for span in spans:
                     result = await self.p.privacy_detector.detect(PrivacyDetectionInput(project_id=lease.job.project_id,record_id=rid,text=span["text"]))
-                    text=span["text"];uncertain=result.unresolved;last=0
+                    text=span["text"];uncertain=result.unresolved;last=0;names=[]
                     changes=[]
                     for detection in sorted(result.detections,key=lambda x:x.start):
                         require(last<=detection.start<detection.end<=len(text))
@@ -168,10 +168,9 @@ class Jobs:
                         if detection.confidence=="uncertain":uncertain=True
                         if detection.kind in ("postal_address","private_discussion"):
                             changes.append((detection.start,detection.end,"[private context removed]"))
-                        elif detection.kind=="name" and not detection.identity_hint:
-                            uncertain=True
+                        elif detection.kind=="name":names.append(text[detection.start:detection.end])
                     for start,end,replacement in reversed(changes):text=text[:start]+replacement+text[end:]
-                    detected[span["span_id"]]=(text,uncertain)
+                    detected[span["span_id"]]=(text,uncertain,names)
         def apply(s,j):
             stage=j["public"]["stage"]
             if stage=="received":
@@ -190,7 +189,9 @@ class Jobs:
                 for ref in j["work"]["record_versions"]:
                     r=s["records"][ref["record_id"]];ids=set()
                     for sp in r["raw_spans"]:
-                        detected_text,detected_uncertain=detected.get(sp["span_id"],(sp["text"],False))
+                        detected_text,detected_uncertain,detected_names=detected.get(sp["span_id"],(sp["text"],False,[]))
+                        known_names={person["display_name"].casefold() for person in s["people"].values()}
+                        detected_uncertain |= any(name.casefold() not in known_names for name in detected_names)
                         normalized=normalize(detected_text,s["people"],ingestion=True)
                         unresolved|=detected_uncertain
                         r["spans"][sp["ordinal"]]["text"]=normalized.text;ids.update(normalized.person_ids);unresolved|=normalized.ambiguous

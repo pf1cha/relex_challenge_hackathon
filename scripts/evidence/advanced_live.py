@@ -7,7 +7,7 @@ from app.evidence.jobs import run_once
 from live_helpers import build
 async def main():
     parser=argparse.ArgumentParser();parser.add_argument("--run-id",required=True);args=parser.parse_args()
-    schema="a_adv_"+args.run_id.replace("-","_")
+    schema="a_adv_"+args.run_id.lower().replace("-","_")
     secret=secrets.token_hex(32);p,b,provider,index=build(schema,secret)
     output=Path("artifacts/evidence")/args.run_id;output.mkdir(parents=True,exist_ok=True)
     observations=[]
@@ -59,7 +59,7 @@ async def main():
                         assert all(e["role"]!="maintenance" for e in events),events
                 if phase==mode:await asyncio.sleep(15.1)
             note("CT-17-"+mode,status="PASS",schema=childschema,job_id=job.id,batch_ids=[v["batch_id"] for v in before],resume_provider_events=events)
-            await cpv.close();await ci.close()
+            await cpv.close();await ci.close();await cp.db.close()
         first=await p.associate_person(await ctx(),PersonInput(display_name="Alex Reed",kind="employee",contacts=[Contact(kind="email",value="first@synthetic.invalid")]))
         second=await p.associate_person(await ctx(),PersonInput(display_name="Alex Reed",kind="employee",contacts=[Contact(kind="email",value="second@synthetic.invalid")]))
         content=b"Date: 2026-09-01\nAlex Reed first@synthetic.invalid agreed the October launch.\nAlex Reed second@synthetic.invalid owns the November report.\n"
@@ -108,14 +108,16 @@ async def main():
         assert (await p.get_status(await ctx())).write_barrier
         index.url=saved_url
         await p.retry_job(await ctx(),lateerase.id)
-        state=await drain(lateerase);assert state.state=="completed",state
+        recovery=await asyncio.create_subprocess_exec(sys.executable,"scripts/evidence/crash_worker.py",schema,"resume",str(output/"cleanup-restart.json"),env=dict(os.environ,A_LIVE_SECRET=secret))
+        assert await recovery.wait()==0
+        state=await p.get_job(await ctx(),lateerase.id);assert state.state=="completed",state
         assert not (await p.get_status(await ctx())).write_barrier
         async with p.db.connection() as conn:
             row=await (await conn.execute("SELECT data FROM projects WHERE id=%s",(project,))).fetchone()
             jobrow=row["data"]["jobs"][lateerase.id];removed=jobrow["work"]["removal_entry_ids"]
             assert not await index.fetch(removed)
             assert all(op["public"]["state"] not in ("pending","in_flight","unknown") for op in row["data"]["operations"].values())
-        note("CT-10/LIVE-08",status="PASS",job_id=lateerase.id,removed_entry_ids=removed,checks=["real paused upsert","barrier before drain","late completion token accepted","real dependency unavailable","same-job retry","obsolete Qdrant points absent"])
+        note("CT-10/LIVE-08",status="PASS",job_id=lateerase.id,removed_entry_ids=removed,checks=["real paused upsert","barrier before drain","late completion token accepted","real dependency unavailable","same-job retry in a new real worker process","obsolete Qdrant points absent"])
     finally:
-        await provider.close();await index.close()
+        await provider.close();await index.close();await p.db.close()
 asyncio.run(main())

@@ -26,7 +26,7 @@ class DTO(BaseModel):
         if type(self).__name__ == "SourceTime":
             patterns = {"year":r"\d{4}", "month":r"\d{4}-\d{2}", "day":r"\d{4}-\d{2}-\d{2}"}
             if self.precision == "unknown":
-                if self.value is not None or self.timezone is not None: raise ValueError("unknown time has no value or zone")
+                if self.value is not None: raise ValueError("unknown time has no value")
             elif self.value is None: raise ValueError("time value required")
             elif self.precision == "instant": _instant(self.value)
             else:

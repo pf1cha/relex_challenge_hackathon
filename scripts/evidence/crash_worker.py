@@ -24,5 +24,5 @@ async def main():
         await run_once(p,b,"a-crash-worker")
         out.write_text(json.dumps({"events":provider.events,"mode":mode}))
     finally:
-        await provider.close();await index.close()
+        await provider.close();await index.close();await p.db.close()
 asyncio.run(main())

@@ -7,7 +7,30 @@ from app.evidence.jobs import run_once
 from live_helpers import build
 async def main():
     args=argparse.ArgumentParser();args.add_argument("--run-id",required=True);a=args.parse_args()
-    schema="a_src_"+a.run_id.replace("-","_");p,b,provider,index=build(schema,secrets.token_hex(32));await p.db.migrate()
+    schema="a_src_"+a.run_id.lower().replace("-","_");p,b,provider,index=build(schema,secrets.token_hex(32));await p.db.migrate()
+    original_generate=provider.generate;original_embed=provider.embed;privacy_calls=[]
+    def assert_private_absent(value):
+        serialized=json.dumps(value).casefold()
+        assert "casey test" not in serialized and "casey@synthetic.invalid" not in serialized
+    async def checked_generate(role,system,payload,**kwargs):
+        assert_private_absent(payload);privacy_calls.append(role)
+        return await original_generate(role,system,payload,**kwargs)
+    async def checked_embed(texts,**kwargs):
+        assert_private_absent(texts);privacy_calls.append("embedding")
+        return await original_embed(texts,**kwargs)
+    provider.generate=checked_generate;provider.embed=checked_embed
+    import traceback
+    original_process=b.process_record
+    async def diagnostic(*args):
+        try:return await original_process(*args)
+        except Exception as error:
+            seen=set();cause=error
+            while cause is not None and id(cause) not in seen:
+                seen.add(id(cause))
+                print(json.dumps({"diagnostic_type":type(cause).__name__,"locations":[[x.filename,x.lineno,x.name] for x in traceback.extract_tb(cause.__traceback__)]}),flush=True)
+                cause=cause.__cause__ or cause.__context__
+            raise
+    b.process_record=diagnostic
     out=Path("artifacts/evidence")/a.run_id;out.mkdir(parents=True,exist_ok=True);observations=[]
     def note(case,**data):
         observations.append(dict(case=case,**data));(out/"sources.json").write_text(json.dumps(observations,indent=2));print(json.dumps(observations[-1]),flush=True)
@@ -72,6 +95,6 @@ async def main():
         bad=reference.model_copy(update={"record_version":reference.record_version+1})
         check=await p.validate_candidates(await ctx(),[bad],SearchFilters());assert not check.eligible and check.rejected_entry_ids==[bad.entry_id]
         await denied("source_unavailable",p.read_source(await ctx(),SourceRequest(record_id=rid,version=99,span_id=ref.span_ids[0])))
-        note("R-A1/R-A3-canonical-access",status="PASS",checks=["19 canonical read entry points reject nonmember","unrelated publication preserves original valid candidate","stale index reference yields no canonical text","old source version denied"])
-    finally:await provider.close();await index.close()
+        note("R-A1/R-A3-canonical-access",status="PASS",checks=["19 canonical read entry points reject nonmember","unrelated publication preserves original valid candidate","stale index reference yields no canonical text","old source version denied"],privacy_provider_calls=privacy_calls)
+    finally:await provider.close();await index.close();await p.db.close()
 asyncio.run(main())

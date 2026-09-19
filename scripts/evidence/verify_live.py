@@ -56,6 +56,7 @@ async def main():
     # Native transaction state survives adapter recreation.
     p2=EvidencePlatform(Postgres(dsn,schema),p.secret)
     assert (await p2.get_status(await actx())).eligible_records==0
+    await p2.db.close()
     report("R-A1","PASS",schema=schema,project_id=project,other_project_id=project2,checks=["repeat migration","real login","admin/member/outsider","last admin","project filter","logout","adapter restart"])
     if args.component_only:
         report("R-A2/R-A3/R-A4","BLOCKED",reason="component-only development mode; no substitute acceptance")
@@ -123,18 +124,18 @@ async def main():
         deletion=await p.mutate_document(await actx(),docs.items[0].id,"delete");current=await work(deletion);assert current.state=="completed",dump_job(current)
         assert not (await p.list_documents(await actx(),PageRequest())).items
         report("R-A4-document-delete","PASS",job_id=current.id,barrier=(await p.get_status(await actx())).write_barrier)
-        for script,suffix in (("advanced_live.py","_adv"),("source_live.py","_src")):
+        for script,suffix in (("advanced_live.py","_adv"),("source_live.py","_src"),("capability_live.py","_cap"),("multichunk_live.py","_multi")):
             process=await asyncio.create_subprocess_exec(sys.executable,"scripts/evidence/"+script,"--run-id",args.run_id+suffix)
             code=await process.wait()
             if code:
                 report("R-A2/R-A4-extended","FAIL",script=script,exit_status=code)
                 return code
-        report("R-A1/R-A2/R-A3/R-A4","PASS",extended_runs=[args.run_id+"_adv",args.run_id+"_src"])
+        report("R-A1/R-A2/R-A3/R-A4","PASS",extended_runs=[args.run_id+suffix for suffix in ("_adv","_src","_cap","_multi")])
         return 0
     except DomainError as exc:
         report("R-A2/R-A3/R-A4","FAIL",code=exc.code);return 1
     finally:
-        await provider.close();await index.close()
+        await provider.close();await index.close();await p.db.close()
 def dump_job(job):return job.model_dump(mode="json")
 if __name__=="__main__":
     raise SystemExit(asyncio.run(main()))
