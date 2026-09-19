@@ -5,14 +5,21 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --ink: #17211d;
+  --ink-soft: #64706a;
+  --ink-faint: #8b958f;
   --muted: #6d7972;
   --line: #dfe5df;
   --line-strong: #cbd5cc;
-  --surface: rgba(255, 255, 255, .84);
+  --surface: #fff;
+  --surface-soft: #f7f9f6;
   --wash: #edf2ed;
+  --sidebar: #18211d;
   --accent: #286b54;
   --accent-dark: #1d503f;
   --accent-soft: #dcece3;
+  --coral: #d65745;
+  --coral-soft: #fbe9e6;
+  --amber-soft: #fff3d6;
   --danger: #a33e35;
 }
 * { box-sizing: border-box; }
@@ -165,15 +172,30 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
 .document-library > .pager-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .document-library .document-card { min-height: 210px; margin: 0; }
 
-.search-layout { display: grid; grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); gap: 20px; align-items: start; }
 .filter-panel, .results-panel, .conversation-rail, .chat-thread, .admin-panel, .health-panel { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-.filter-panel { position: sticky; top: 102px; padding: 20px; }
-.search-form { display: grid; gap: 13px; margin: 18px 0 0; padding: 0; border: 0; box-shadow: none; }
-.search-form .search-query { width: 100%; }
-.search-form > button { width: 100%; margin-top: 4px; }
-.results-panel { min-height: 480px; padding: 20px; }
-.results-panel > .empty-state { margin-top: 18px; }
-.search-results { margin-top: 14px; }
+.search-workspace { width: 100%; }
+.search-form { display: block; margin: 0; padding: 20px; }
+.search-primary { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }
+.search-query-field { min-width: 0; }
+.search-form .search-query { width: 100%; min-height: 46px; font-size: 15px; }
+.search-primary > button { min-width: 150px; min-height: 46px; }
+.search-filters { margin-top: 18px; border-top: 1px solid var(--line); }
+.search-filters summary { display: flex; align-items: center; gap: 8px; width: 100%; padding: 15px 0 0; color: var(--accent-dark); font-size: 12px; font-weight: 800; list-style: none; cursor: pointer; }
+.search-filters summary::-webkit-details-marker { display: none; }
+.search-filters summary::after { display: grid; place-items: center; width: 22px; height: 22px; margin-left: auto; border: 1px solid var(--line-strong); border-radius: 50%; color: var(--accent-dark); content: "+"; font-size: 16px; line-height: 1; }
+.search-filters[open] summary::after { content: "-"; }
+.filter-count { color: var(--ink-soft); font-size: 11px; font-weight: 600; }
+.filter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding-top: 16px; }
+.filter-grid .field { min-width: 0; }
+.filter-grid input, .filter-grid select { width: 100%; }
+.results-panel { min-height: 300px; margin-top: 18px; padding: 20px; }
+.results-header { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.results-header h3 { margin: 0; }
+.results-status { color: var(--ink-soft); font-size: 11px; }
+.results-panel > .empty-state { margin: 20px 0 0; }
+.search-results { display: grid; gap: 10px; margin-top: 14px; }
+.search-results .search-result { margin: 0; }
+.results-panel > .button-secondary { margin-top: 14px; }
 
 .chat-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
 .conversation-rail { position: sticky; top: 102px; padding: 20px; }
@@ -226,6 +248,7 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .auth-intro h2 { font-size: 42px; }
   .member-row { grid-template-columns: 1fr auto; }
   .member-row small { grid-column: 1 / -1; }
+  .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 680px) {
@@ -248,6 +271,10 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .page-header h2 { font-size: 27px; }
   form { align-items: stretch; flex-direction: column; }
   form label, form input, form select, form > button { width: 100%; }
+  .search-primary { grid-template-columns: 1fr; }
+  .search-primary > button { width: 100%; }
+  .filter-grid { grid-template-columns: 1fr; }
+  .results-header { align-items: flex-start; flex-direction: column; gap: 4px; }
   .composer { bottom: 6px; }
   .composer button { width: 100%; }
   .message { width: 96%; }
