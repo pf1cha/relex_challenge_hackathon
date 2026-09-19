@@ -1,11 +1,16 @@
 """Probe authorized OpenAI-compatible endpoints using synthetic input only.
 
-Supply RELEX_MODEL_* and RELEX_EMBEDDING_* through the process environment.
+Load repository .env; existing process environment values take precedence.
 Print model identifiers and embedding dimensions, never API keys or raw responses.
 """
 import json
 import os
 import sys
+from pathlib import Path
+from urllib.parse import urlparse
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
 import urllib.error
 import urllib.request
 
@@ -15,7 +20,9 @@ def call(prefix, route, payload):
     if not base or not model:
         raise RuntimeError(prefix + ': base URL and model identifier must be configured')
     headers = {'Content-Type': 'application/json'}
-    key = os.environ.get(prefix + '_API_KEY')
+    key = os.environ.get(prefix + '_API_KEY') or os.environ.get('OPENAI_API_KEY')
+    if urlparse(base).hostname == 'api.openai.com' and not key:
+        raise RuntimeError(prefix + ': OPENAI_API_KEY is missing; add it to the private repository .env')
     if key:
         headers['Authorization'] = 'Bearer ' + key
     request = urllib.request.Request(base + route, data=json.dumps(dict(payload, model=model)).encode(), headers=headers)
