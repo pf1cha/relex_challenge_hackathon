@@ -13,7 +13,7 @@ from app.config import HttpSettings
 from app.contracts.models import *
 from app.contracts.ports import Services
 from app.contracts.errors import DomainError
-from app.api.schemas import LoginInput, RegisterInput, ConversationInput, MemberInput, SearchBody, PrivacyResolutionInput
+from app.api.schemas import LoginInput, RegisterInput, ConversationInput, MemberInput, SearchBody, PrivacyResolutionInput, ProjectTypeInput
 from app.api.errors import error_response
 
 def create_app(services: Services, settings: HttpSettings) -> FastAPI:
@@ -130,6 +130,12 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
     async def projects(who=Depends(principal), paging=Depends(page)):
         return await services.projects.list_projects(who,paging)
     base="/api/projects/{p}"
+    @app.get(base+"/types", response_model=Page[ProjectType])
+    async def project_types(ctx=Depends(context), paging=Depends(page)):
+        return await services.projects.list_project_types(ctx)
+    @app.post(base+"/types", response_model=ProjectType, status_code=201, dependencies=[Depends(no_query)])
+    async def create_project_type(body: ProjectTypeInput, ctx=Depends(admin)):
+        return await services.projects.create_project_type(ctx, body.name)
     @app.get(base+"/documents", response_model=Page[Document])
     async def documents(ctx=Depends(context), paging=Depends(page)):
         return await services.documents.list_documents(ctx,paging)

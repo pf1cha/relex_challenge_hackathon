@@ -43,7 +43,7 @@ class Page(DTO, Generic[T]):
     items: list[T]
     next_cursor: str | None
 Role = Literal['member', 'admin']
-RecordType = Literal['email', 'transcript', 'report', 'specification']
+RecordType = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9 _-]*$")]
 Purpose = Literal['answer_evidence', 'admin_source_preview']
 JobKind = Literal['ingest', 'activate', 'deactivate', 'delete_document', 'erase_person', 'rebuild_aggregate', 'reconcile']
 JobState = Literal['pending', 'running', 'completed', 'failed']
@@ -83,9 +83,12 @@ class Project(DTO):
     name: str
     role: Role
 
+class ProjectType(DTO):
+    name: RecordType
+
+
 class Document(DTO):
     id: Id
-    project_id: Id
     title: str
     record_type: RecordType
     ai_status: Literal['active', 'inactive']

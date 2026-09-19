@@ -35,3 +35,9 @@ class SearchBody(DTO):
 
 class PrivacyResolutionInput(DTO):
     resolution: Annotated[str, Field(min_length=1, max_length=500)]
+
+class ProjectTypeInput(DTO):
+    name: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9 _-]*$")]
+
+class ProjectTypeInput(DTO):
+    name: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[a-z0-9][a-z0-9 _-]*$")]

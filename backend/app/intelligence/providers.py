@@ -46,14 +46,17 @@ class ModelProvider:
             raise ProviderFailure("provider_unavailable") from None
 
     async def generate(self, role: str, system: str, payload: dict, *, max_tokens=4096,
-                       json_schema: dict[str, Any] | None = None) -> dict:
+                       json_schema: dict[str, Any] | None = None,
+                       temperature: float | None = None) -> dict:
         started = time.monotonic()
         response_format = ({"type":"json_schema","json_schema":json_schema}
                            if json_schema is not None else {"type":"json_object"})
-        result = await self._post(self.settings.base_url, "/chat/completions", self.settings.api_key,
-            {"model": self.settings.model, "messages": [{"role":"system","content":system},
-             {"role":"user","content":json.dumps(payload, ensure_ascii=False)}],
-             "response_format":response_format, "max_completion_tokens":max_tokens})
+        body={"model": self.settings.model, "messages": [{"role":"system","content":system},
+              {"role":"user","content":json.dumps(payload, ensure_ascii=False)}],
+              "response_format":response_format, "max_completion_tokens":max_tokens}
+        if temperature is not None:
+            body["temperature"]=temperature
+        result = await self._post(self.settings.base_url, "/chat/completions", self.settings.api_key, body)
         try:
             content = result["choices"][0]["message"]["content"]
             value = json.loads(content)

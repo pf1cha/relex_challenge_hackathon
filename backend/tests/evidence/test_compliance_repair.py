@@ -25,7 +25,7 @@ class CorrectingProvider:
             "person", "organization", "role", "contact", "personal_identifier",
             "contextual_circumstance", "uncertain"]
         if self.calls == 1:
-            return {"complete": False, "covered_span_ids": [], "entities": [], "edits": [], "unresolved_reasons": []}
+            return {"complete": False, "covered_span_ids": [], "entities": [], "unresolved_reasons": []}
         span = payload["spans"][0]
         name = "Åsa Öberg"
         personal_id = "OP_ID 447102"
@@ -39,12 +39,6 @@ class CorrectingProvider:
                  "kind": "person", "identity_hint": "NEW_1", "evidence_span_ids": [span["span_id"]], "confidence": "certain"},
                 {"span_id": span["span_id"], "start": b, "end": b + len(personal_id), "expected_text": personal_id,
                  "kind": "personal_identifier", "identity_hint": "NEW_1", "evidence_span_ids": [span["span_id"]], "confidence": "certain"},
-            ],
-            "edits": [
-                {"span_id": span["span_id"], "start": a, "end": a + len(name), "expected_text": name,
-                 "replacement": "NEW_1", "reason": "identity"},
-                {"span_id": span["span_id"], "start": b, "end": b + len(personal_id), "expected_text": personal_id,
-                 "replacement": "NEW_1", "reason": "personal_identifier"},
             ],
             "unresolved_reasons": [],
         }
@@ -134,6 +128,24 @@ async def test_privacy_plan_uses_one_correction_and_unicode_codepoint_ranges():
     assert text[plan.entities[0].start:plan.entities[0].end] == "Åsa Öberg"
 
 
+def test_privacy_canonicalizes_only_unique_exact_expected_text_offsets():
+    spans = [{"span_id": "s1", "text": "Call +358 40 123 4567 now."}]
+    result = {
+        "entities": [{"span_id": "s1", "start": 5, "end": 12,
+                      "expected_text": "+358 40 123 4567"}],
+        "edits": [],
+    }
+    fixed = PrivacyAgent._canonicalize_unique_offsets(result, spans)
+    assert fixed["entities"][0]["start"] == 5
+    assert fixed["entities"][0]["end"] == 21
+
+    repeated = [{"span_id": "s1", "text": "Alex met Alex."}]
+    ambiguous = {"entities": [{"span_id": "s1", "start": 1, "end": 2,
+                                "expected_text": "Alex"}]}
+    unchanged = PrivacyAgent._canonicalize_unique_offsets(ambiguous, repeated)
+    assert (unchanged["entities"][0]["start"], unchanged["entities"][0]["end"]) == (1, 2)
+
+
 @pytest.mark.asyncio
 async def test_privacy_provider_failure_is_visible_and_safe():
     text = "No deterministic trigger is present."
@@ -144,14 +156,14 @@ async def test_privacy_provider_failure_is_visible_and_safe():
 
 
 @pytest.mark.asyncio
-async def test_privacy_rejects_contact_entity_without_source_bound_edit():
+async def test_privacy_compiles_contact_entity_to_source_bound_edit():
     text = "Contact owner@example.test for the handoff."
     provider = UneditedContactProvider()
-    with pytest.raises(DomainError) as failure:
-        await PrivacyAgent(provider).plan("project", "record", 1, [{"span_id": "s1", "text": text}],
-            hashlib.sha256(text.encode()).hexdigest())
-    assert failure.value.code == "privacy_unresolved"
-    assert provider.calls == 2
+    plan = await PrivacyAgent(provider).plan("project", "record", 1, [{"span_id": "s1", "text": text}],
+        hashlib.sha256(text.encode()).hexdigest())
+    assert [(edit.reason, edit.expected_text, edit.replacement) for edit in plan.edits] == [
+        ("personal_identifier", "owner@example.test", "[personal identifier removed]")]
+    assert provider.calls == 1
 
 
 @pytest.mark.asyncio

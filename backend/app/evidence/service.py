@@ -26,7 +26,7 @@ def password_hash(password, salt=None):
     salt=salt or secrets.token_hex(16)
     return salt+":"+hashlib.scrypt(password.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
 def fresh_state():
-    return dict(corpus_generation=0,privacy_generation=0,lifecycle_revision=0,reservation=0,write_barrier=False,members={},documents={},records={},people={},jobs={},memories={},chunks={},entries={},history={},checkpoints={},operations={},conversations={},messages={},attempts={},answers={},plans={},capabilities={},overview=None,privacy_plans={},privacy_diagnostics={},privacy_resolutions={},access_epochs={})
+    return dict(corpus_generation=0,privacy_generation=0,lifecycle_revision=0,reservation=0,write_barrier=False,members={},project_types={x: True for x in ("email", "transcript", "report", "specification")},documents={},records={},people={},jobs={},memories={},chunks={},entries={},history={},checkpoints={},operations={},conversations={},messages={},attempts={},answers={},plans={},capabilities={},overview=None,privacy_plans={},privacy_diagnostics={},privacy_resolutions={},access_epochs={})
 
 class EvidencePlatform:
     def __init__(self, db, secret, privacy_detector=None, upload_limit_bytes=10*1024*1024, request_deadline_seconds=120, lease_seconds=300):
@@ -166,6 +166,19 @@ class EvidencePlatform:
             items=[Project(id=r["id"],name=r["name"],role=r["role"]) for r in rows]
             return self._page(items,page,["projects",principal.user_id,[[r["id"],r["access_revision"]] for r in rows]])
 
+    async def list_project_types(self,ctx):
+        async with self.transaction(ctx) as (_,s):
+            items=[ProjectType(name=name) for name in sorted(s.get("project_types", {}))]
+            return Page(items=items,next_cursor=None)
+
+    async def create_project_type(self,ctx,name):
+        name=name.strip().casefold()
+        require(re.fullmatch(r"[a-z0-9][a-z0-9 _-]{0,63}",name),"invalid_input")
+        async with self.transaction(ctx,admin=True,write=True) as (_,s):
+            require(name not in s.setdefault("project_types", {}),"already_exists")
+            s["project_types"][name]=True
+            return ProjectType(name=name)
+
     def _document(self,s,document_id):
         d=s["documents"].get(document_id);require(d and not d.get("deleted"),"not_found");return d
     def _record(self,s,record_id,preview=False):
@@ -217,6 +230,7 @@ class EvidencePlatform:
         except UnicodeDecodeError:raise DomainError("unsupported_format") from None
         require(text.strip() and "\x00" not in text,"unsupported_format")
         async with self.transaction(ctx,admin=True,write=True,restricted=True) as (_,s):
+            require(upload.record_type in s.get("project_types", {}),"invalid_input")
             doc_id=uid();title=normalize(upload.filename,s["people"]).text
             if normalize(upload.filename,s["people"]).ambiguous:title="Restricted upload"
             job=self._new_job(s,ctx.project_id,"ingest",docs=[doc_id])

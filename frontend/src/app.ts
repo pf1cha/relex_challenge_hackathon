@@ -99,10 +99,11 @@ function pager<T>(container:HTMLElement,path:string,draw:(item:T)=>HTMLElement){
  async function load(){more.disabled=true;try{const page=await api<Page<T>>(path+(cursor?"?cursor="+encodeURIComponent(cursor):""));for(const item of page.items)rows.append(draw(item));cursor=page.next_cursor;more.hidden=!cursor;if(!rows.children.length)rows.append(el("p","No items."));}finally{more.disabled=false;}}return load();}
 async function documents(main:HTMLElement,mark:number){main.replaceChildren(pageHeader("Documents",pageDescriptions.documents,"Library"));
  const status=await api<Models["ProjectStatus"]>(base()+"/status");current(mark);
+ const projectTypes=(await api<Page<{name:string}>>(base()+"/types")).items.map(x=>x.name);
  const summary=el("section","","library-summary");for(const [value,label] of [[status.eligible_documents,"AI-ready documents"],[status.eligible_records,"Searchable records"],[status.write_barrier?"Paused":"Ready","Ingestion"]]){const item=el("div","","summary-item");item.append(el("strong",String(value)),el("span",String(label)));summary.append(item);}main.append(summary);
  if(status.write_barrier)main.append(el("p","Project cleanup is in progress. Uploads and chat writes are temporarily unavailable.","banner"));
  if(project?.role==="admin"){const form=el("form","","toolbar-form upload-form"),file=input("Text file","file");file.accept=".txt,text/plain";
- const kind=select("Record type",["email","transcript","report","specification"].map(x=>[x,x]));
+ const kind=select("Record type",projectTypes.map(x=>[x,x]));
  const upload=el("button","Upload");upload.type="submit";upload.disabled=status.write_barrier;form.append(field("UTF-8 text file",file),field("Record type",kind),upload);
  form.onsubmit=async e=>{e.preventDefault();const f=file.files?.[0];if(!f)return;upload.disabled=true;
  const data=new FormData();data.set("file",f);data.set("record_type",kind.value);
@@ -192,7 +193,11 @@ async function overview(main:HTMLElement,mark:number){const data=await api<Model
 async function visualization(main:HTMLElement,mark:number){const status=await api<Models["ProjectStatus"]>(base()+"/status");current(mark);const stats=el("section","","stat-grid");for(const [value,label] of [[status.eligible_documents,"Eligible documents"],[status.eligible_records,"Eligible records"],[status.write_barrier?"Paused":"Available","Workspace writes"]]){const card=el("article","","stat-card");card.append(el("strong",String(value)),el("span",String(label)));stats.append(card);}
  main.replaceChildren(pageHeader("Project status",pageDescriptions.visualization,"Workspace health"),stats,el("p","Detailed visualization modules are planned for a later release.","muted"));}
 async function administration(main:HTMLElement,mark:number){main.replaceChildren(pageHeader("Project administration",pageDescriptions.administration,"Admin tools"),el("p","Membership controls access to this workspace. Personnel associations and erasure remain separate.","section-note"));
- const accessPanel=el("section"),peoplePanel=el("section");main.append(accessPanel,peoplePanel);
+ const accessPanel=el("section"),peoplePanel=el("section"),typesPanel=el("section");main.append(accessPanel,peoplePanel,typesPanel);
+ const types=el("section");typesPanel.append(el("h3","Document types"),types);
+ await pager<{name:string}>(types,base()+"/types",t=>el("article",t.name,"member-row"));
+ const typeForm=el("form"),typeName=input("New document type"),typeSave=el("button","Create document type");typeSave.type="submit";typeName.required=true;typeName.maxLength=64;typeForm.append(field("New document type",typeName),typeSave);
+ typeForm.onsubmit=async e=>{e.preventDefault();typeSave.disabled=true;try{await api(base()+"/types","POST",{name:typeName.value});typeName.value="";await renderView();}catch(e){showError(e);}finally{typeSave.disabled=false;}};typesPanel.append(typeForm);
  const members=el("section");accessPanel.append(el("h3","Members"),members);
  await pager<Models["Member"]>(members,base()+"/members",m=>{const row=el("article","","member-row");row.append(el("strong",m.display_name),el("span",m.role,"role-badge"),el("small",m.user_id));row.append(button("Remove access",async()=>{if(!confirm("Remove membership for "+m.display_name+" ("+m.user_id+") from "+project?.name+"? This does not erase their personal information."))return;await api(base()+"/members/"+encodeURIComponent(m.user_id),"DELETE");row.remove();},"button-danger"));return row;});
  const memberForm=el("form"),user=input("Registered email or account ID"),role=select("Role",[["member","Member"],["admin","Admin"]]),save=el("button","Grant or update access");save.type="submit";user.required=true;user.maxLength=320;memberForm.append(field("Registered email or account ID",user),field("Project role",role),save);

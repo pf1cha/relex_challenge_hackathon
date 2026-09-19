@@ -14,7 +14,7 @@ from psycopg.types.json import Jsonb
 
 
 STATE_KEYS = (
-    "members", "documents", "records", "people", "jobs", "memories",
+    "members", "project_types", "documents", "records", "people", "jobs", "memories",
     "chunks", "entries", "history", "checkpoints", "operations",
     "conversations", "messages", "attempts", "answers", "plans",
     "capabilities", "privacy_plans", "privacy_diagnostics",
@@ -72,6 +72,7 @@ async def load_project(conn, project_id, *, restricted=False, for_update=False):
     state = empty_state()
     for key in ("corpus_generation", "privacy_generation", "lifecycle_revision", "reservation", "write_barrier", "overview"):
         state[key] = row[key]
+    state["project_types"] = row.get("project_types") or {x: True for x in ("email", "transcript", "report", "specification")}
 
     for member in await _rows(conn,
             "SELECT user_id,role,access_revision,granted_at FROM project_memberships WHERE project_id=%s",
@@ -230,14 +231,14 @@ async def _sync_references(conn, project_id, state):
 async def sync_project(conn, project_id, state, *, restricted=False, scrub_legacy=True):
     """Synchronize a complete in-memory transaction into normalized authority."""
     await conn.execute(
-        "INSERT INTO project_state(project_id,corpus_generation,privacy_generation,lifecycle_revision,reservation,write_barrier,overview,updated_at) "
-        "VALUES(%s,%s,%s,%s,%s,%s,%s,now()) ON CONFLICT(project_id) DO UPDATE SET "
+        "INSERT INTO project_state(project_id,corpus_generation,privacy_generation,lifecycle_revision,reservation,write_barrier,overview,project_types,updated_at) "
+        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,now()) ON CONFLICT(project_id) DO UPDATE SET "
         "corpus_generation=excluded.corpus_generation,privacy_generation=excluded.privacy_generation,"
         "lifecycle_revision=excluded.lifecycle_revision,reservation=excluded.reservation,"
-        "write_barrier=excluded.write_barrier,overview=excluded.overview,updated_at=now()",
+        "write_barrier=excluded.write_barrier,overview=excluded.overview,project_types=excluded.project_types,updated_at=now()",
         (project_id, state["corpus_generation"], state["privacy_generation"],
          state["lifecycle_revision"], state["reservation"], state["write_barrier"],
-         Jsonb(state.get("overview"))))
+         Jsonb(state.get("overview")), Jsonb(state.get("project_types", {}))))
 
     members = state.get("members", {})
     for user_id, member in members.items():
