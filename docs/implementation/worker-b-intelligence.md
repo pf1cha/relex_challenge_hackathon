@@ -1,6 +1,14 @@
 # Worker B — maintained memory, retrieval and reviewed answers
 
-Read `README.md` and `architecture.md` first. Sources: architecture §§4-8,10,12 and production behavior §4. Own `backend/app/intelligence/` and the other B paths. Depend on injected contract ports, never A's concrete repositories; C composes and exposes your service. Start with prompts, schemas and local test fixtures while A builds contracts; shared live fixtures belong to C.
+Read `README.md`, `architecture.md` and `independent-testing.md` first. Sources: architecture §§4-8,10,12 and production behavior §4. Own `backend/app/intelligence/` and the other B paths. Depend on injected contract ports, never A's concrete repositories; C composes and exposes your service. Start from G0 contracts with prompts, schemas and owned test fixtures. B owns its live standalone fixtures; C owns shared integration fixtures.
+
+## S-B — independent acceptance
+
+Implement B1-B4 while A/C work independently. Use G0 contracts and `independent-testing.md`. Own canonical repository/eligibility/lexical/staging substitutes and sanitized fixtures under `backend/tests/intelligence/`, plus a runner under `scripts/intelligence/`. Do not require A's repositories/migrations or C's server/bootstrap.
+
+Run actual B maintenance, chunking, fusion, expansion, chronology, answer/reviewer and index lifecycle code. Fixture ports supply ordered canonical spans, lexical candidates, version changes and controlled authorization failures; they capture staged outputs. Deterministic mode uses scripted providers for budgets/failures/repairs. Live mode uses the same canonical fixture boundary with real Qdrant, generation, reviewer and embeddings, including B-C1..9.
+
+S-B establishes B's behavior under the canonical contract. A's SQL lexical implementation, real authorization, atomic publication/release and end-to-end erasure remain integration checks. Assert B calls eligibility and rejects stale candidates; do not claim a fixture repository proves production security.
 
 ## B1 — evidence-linked memory and real indexing
 
@@ -64,6 +72,6 @@ Acceptance: real reviewer rejects deliberately unsupported attribution and a sta
 
 ## Done and dispatch prompt
 
-Record B1-B4 and B-C1..9 in `evidence-b.md`: actual model outputs, semantic assertions, prohibited claims, receipts, safe tool traces and failed attempts. Synthetic model stubs may support local development; live acceptance requires real model/reviewer/embedding calls. Do not hide failed first attempts behind successful retries.
+Record B1-B4 and B-C1..9 in `evidence-b.md`: actual model outputs, semantic assertions, prohibited claims, receipts, safe tool traces and failed attempts. Model stubs pass deterministic S-B checks only. S-B live acceptance requires real model/reviewer/embedding and Qdrant calls while A's ports may remain fixture-backed. G1-G4 additionally require real A/C implementations. Do not hide failed first attempts behind successful retries.
 
-> Implement Worker B in `/scratch/project_2020551/relex-0919` using this file and the shared README. Start B1 schemas/prompts while A publishes contracts; deliver B1-B4 in order. Use A's repository and eligibility interfaces and C's route composition. Own only B paths. Verify real retrieval, chronology and independent review with synthetic fixtures; preserve source docs and do not dispatch descendants or change another checkout.
+> Implement Worker B in `/mnt/relex-kai` using this file and the shared README. Start from G0 contracts; implement B1-B4 and run S-B independently while A/C implement their slices. Use A's repository and eligibility interfaces and C's route composition. Own only B paths. Verify real retrieval, chronology and independent review with synthetic fixtures; preserve source docs and do not dispatch descendants or change another checkout.

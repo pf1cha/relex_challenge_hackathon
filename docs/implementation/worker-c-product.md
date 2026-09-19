@@ -1,6 +1,16 @@
 # Worker C — browser product, API composition and acceptance
 
-Read `README.md` and `architecture.md` first. Sources: all of user-features, production behavior §§3-4, architecture §§5,9,11-12. Own `frontend/`, `backend/app/api/`, backend composition/entry points and the other C paths. Assemble A/B services; do not reimplement their authorization, retrieval, privacy or review logic in routes or TypeScript.
+Read `README.md`, `architecture.md` and `independent-testing.md` first. Sources: all of user-features, production behavior §§3-4, architecture §§5,9,11-12. Own `frontend/`, `backend/app/api/`, backend composition/entry points and the other C paths. Assemble A/B services; do not reimplement their authorization, retrieval, privacy or review logic in routes or TypeScript.
+
+## S-C — independent acceptance
+
+Implement C1-C4 while A/B work independently. Use G0 contracts and `independent-testing.md`. Own A/B service substitutes, test composition and scenario controls under `backend/tests/product/` and browser fixtures under `frontend/tests/`. Run actual API routes and the frontend in a real browser. No A/B implementation, PostgreSQL, Qdrant or model endpoint is required.
+
+The real app factory accepts contract services without loading production bootstrap. Fixtures supply session/ownership outcomes, records, reviewed candidates, final-release outcomes and job transitions. Controls are test-only, the fixture UI is clearly marked, and synthetic data is mandatory. Never fall back to fixtures in production.
+
+Exercise C1-C4 interactions: CSRF/error mapping, upload progress/reload, citation hover/focus/tap/new tab, pagination, destructive confirmations, stale receipt 410, release-changed 409, provider failure, retries and logout. Spies assert routes authorize, load server-side history, call B and then A's release operation before returning claims. A withheld release must not leak candidate content.
+
+S-C proves HTTP orchestration and browser behavior. Fixture login/jobs/releases do not establish production sessions, durable recovery, erasure or semantic grounding. Those remain G1-G4 checks. Test fixture persistence, if used for browser reload/restart, must be labeled explicitly.
 
 ## C1 — runnable shell, login and contract adapters
 
@@ -46,7 +56,7 @@ Show the project write-barrier state during erasure: content-producing submissio
 
 ## Evidence checklist and handoff
 
-Create synthetic fixtures only under `fixtures/implementation/`; preserve existing corpus. Own repeatable acceptance orchestration in `scripts/product/`. Coordinate exclusive verification project IDs so workers cannot delete one another's fixtures. Do not use hard-coded answer branches in application code.
+Create shared integration fixtures under `fixtures/implementation/`, and C's independent fixtures under `backend/tests/product/` or `frontend/tests/`; preserve existing corpus. Own repeatable acceptance orchestration in `scripts/product/`. Coordinate exclusive verification project IDs so workers cannot delete one another's fixtures. Do not use hard-coded answer branches in application code.
 
 Record in `evidence-c.md`:
 
@@ -56,6 +66,6 @@ Record in `evidence-c.md`:
 - G3: deactivate/reactivate/delete document and erase person, including failure/retry, old answer/source URLs and in-flight invalidation; A/B store-inspection evidence linked.
 - G4: browser views/interactions, service persistence after restart, all worker acceptance case outcomes, unresolved gaps and exact visualization/provider-retention limitations.
 
-No worker-authored report is proof by itself: retain safe observable results and distinguish expected from actual. Development checks with mocks do not pass live acceptance. When a prerequisite is unavailable, deliver completed code and an explicit unverified case list; never invent PASS.
+No worker-authored report is proof by itself: retain safe observable results and distinguish expected from actual. S-C accepts route/browser behavior against contract substitutes; it does not pass G1-G4 live integration acceptance. When a prerequisite is unavailable, deliver completed code and an explicit unverified case list; never invent PASS.
 
-> Implement Worker C in `/scratch/project_2020551/relex-0919` using this file and the shared README. Start C1 and browser states against shared contract examples while A/B work. Own route composition and runtime/dependency setup, then C2-C4 and shared G1-G4 verification. Use A/B services without duplicating business logic. Preserve inherited changes and source docs; do not dispatch descendants or change another checkout.
+> Implement Worker C in `/mnt/relex-kai` using this file and the shared README. Start from G0 contracts; implement C1-C4 and run S-C with fixture services while A/B implement their slices. Own route composition and runtime/dependency setup, then C2-C4 and shared G1-G4 verification. Use A/B services without duplicating business logic. Preserve inherited changes and source docs; do not dispatch descendants or change another checkout.

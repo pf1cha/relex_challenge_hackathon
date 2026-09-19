@@ -1,6 +1,8 @@
 # Three-worker implementation plan
 
-Status: revision 3, 2026-09-19; policy defaults below are proposals, not previously approved decisions. No workers have been started. Read `architecture.md` for the concrete code layout.
+Status: delivery plan revision 4, 2026-09-19. Three people implement and test A, B and C concurrently. Policy defaults remain proposals; service contract revision 3 is unchanged. Read `architecture.md` for code layout and `independent-testing.md` for standalone acceptance.
+
+Authoritative workspace: `ssh verda`, `/mnt/relex-kai`. This document does not assert current implementation or staffing status.
 This plan does not rely on another checkout's code or delivery contract.
 
 ## Source authority and scope
@@ -35,29 +37,30 @@ These choices make interfaces implementable. Keep them explicit in the handoff; 
 8. Visualization deliverable is project selector and explicitly labeled processing/status information. Actual visualization content remains an open product decision and is not completed by this placeholder.
 9. Retained raw/intermediate uploads are restricted and included in the erasure inventory. Corpus input originals outside application-managed storage are not edited. External provider retention/backups must be inventoried as limits; do not promise erasure outside controlled stores.
 
-## Ownership: exactly three workers
+## Ownership: three parallel implementation slices
 
 | Worker | Outcome | Exclusive paths |
 | --- | --- | --- |
-| A — evidence platform | Authorized, versioned, privacy-safe evidence and durable lifecycle jobs | `backend/app/evidence/`, `backend/app/contracts/`, `backend/migrations/`, `backend/tests/evidence/`, `scripts/evidence/`, `docs/implementation/evidence-a.md` |
+| A — evidence platform | Authorized, versioned, privacy-safe evidence and durable lifecycle jobs | `backend/app/evidence/`, `backend/app/contracts/`, `backend/migrations/`, `backend/tests/evidence/`, `backend/tests/contracts/`, `scripts/evidence/`, `docs/implementation/evidence-a.md` |
 | B — knowledge and answers | Maintained memories, hybrid search, reviewed claims and history | `backend/app/intelligence/`, `backend/tests/intelligence/`, `scripts/intelligence/`, `docs/implementation/evidence-b.md` |
 | C — product and integration | Working authenticated browser/admin flows and assembled application | `backend/app/api/`, `backend/app/__init__.py`, `backend/app/main.py`, `backend/app/bootstrap.py`, `backend/app/config.py`, `backend/app/worker.py`, `backend/tests/product/`, `frontend/`, `scripts/product/`, `fixtures/implementation/`, dependency manifests, `.env.example`, root `README.md`, `docs/implementation/evidence-c.md` |
 
-These are target paths; only architecture README scaffolds exist initially. A owns schema/contract changes; C owns startup, composition and dependency manifests (including backend packaging/test configuration). B requests dependencies from C and contract changes from A. Each worker owns package initializers inside its directories. No two workers edit the same file. Specification files are coordinator-owned. No worker edits the five input docs. Do not overwrite `.env` or restore inherited deletions.
+These are target ownership paths; inspect the current checkout before implementation. A owns schema/contract changes; C owns startup, composition and dependency manifests (including backend packaging/test configuration). Agree independently installable per-slice test dependencies in G0. Subsequent shared dependency changes go through C and contract changes through A; no slice requires another person's running service or completed implementation. Each worker owns package initializers inside its directories. No two workers edit the same file. Specification files are coordinator-owned. No worker edits the five input docs. Do not overwrite `.env` or restore inherited deletions.
 
 ## Parallel execution and integration gates
 
-- **G0 — shared contracts:** A lands contract DTOs/protocols and empty migration skeleton first. B starts model schemas/prompts and deterministic fixtures; C starts UI states and session/API adapters using the JSON examples below. Temporary adapters are for development only and must be replaced for acceptance.
-- **G1 — first vertical flow:** C accepts an admin upload; A persists a sanitized staged record under a job-scoped internal capability; B reads that staged version, creates memories and indexes it; A verifies dependencies and publishes the coherent version; C opens the source as a member. Staged records are never member/agent-readable. Verify outsider denial. A and B jointly validate the durable job handler interface before further jobs.
+- **G0 — shared starter before parallel implementation:** Check in importable revision 3 DTOs/protocols/errors, contract examples/conformance cases and minimal packaging with per-slice test dependencies. A owns contract files and C packaging; this bounded setup requires no completed A1 or production implementation. The prose below alone is not a completed starter. See `independent-testing.md` for readiness.
+- **S-A / S-B / S-C — concurrent standalone acceptance:** All three people implement and test their real slice using substitutes at the other slices' contract boundaries. Each owns fixtures, runner and isolated resources. Tests must run without the other concrete implementations, C's production bootstrap or another person's development server. Standalone acceptance establishes each slice's behavior; G1-G4 establish the assembled product.
+- **G1 — first vertical flow:** C accepts an admin upload; A persists a sanitized staged record under a job-scoped internal capability; B reads that staged version, creates memories and indexes it; A verifies dependencies and publishes the coherent version; C opens the source as a member. Staged records are never member/agent-readable. Verify outsider denial. A and B jointly validate the real durable job handler interface for G1; their standalone job tests proceed independently.
 - **G2 — reviewed chat:** B supplies search and answer service; C exposes it and renders claim receipts; A supplies final eligibility validation. Run the long-record and chronology cases in Worker B's spec.
 - **G3 — lifecycle:** A owns invalidation/erasure coordination, B rebuilds derived artifacts, C exposes job/retry and unavailable states. Run interruption and in-flight invalidation cases.
 - **G4 — live acceptance:** C assembles evidence from A/B and runs authenticated browser workflows using real PostgreSQL, Qdrant, generation and embeddings. Each worker reviews the next worker's boundary (A reviews B eligibility; B reviews C receipt rendering; C reviews A lifecycle API) without editing their files. Unresolved failures remain explicit.
 
-Parallel does not mean dependency-free: B may finish logic before A's live repositories are available; C may finish interaction states before B's model path is available. They cannot claim integration success until G1-G4 pass. Coordinator resolves cross-owner changes; no worker starts additional workers.
+After G0, A1-A4, B1-B4 and C1-C4 proceed concurrently. No standalone test or slice handoff waits for another implementation or shared integration fixtures. G1-G4 are separate integration gates, run as real adapters become available. Shared contract changes require a coordinated version update. Coordinator resolves cross-owner changes.
 
 ## Shared contract revision 3
 
-A implements these as typed models/protocols before collaborators import them. Internal service calls receive a server-created context; public bodies and agent arguments cannot set or override it.
+G0 provides these typed models/protocols with complete signatures and error semantics; A maintains them thereafter. All three slices start from the same pinned contract revision. Internal service calls receive a server-created context; public bodies and agent arguments cannot set or override it.
 
 ```text
 RequestContext(user_id, session_id, project_id, role, access_revision,
@@ -163,8 +166,8 @@ Lists use `{items,next_cursor}`; cursors are opaque and project/role scoped. Doc
 
 ## Overall completion evidence
 
-Each worker records commands, exit status, relevant IDs/versions, observed outcomes and unresolved failures in its evidence file. Never record credentials or raw personal data in traces. Development tests may stub dependencies; end-to-end acceptance must use real services and actual browser interactions. A mock reviewer or fake embedding cannot pass acceptance.
+Each worker records commands, exit status, relevant IDs/versions, observed outcomes and unresolved failures in its evidence file. Never record credentials or raw personal data in traces. Standalone tests may substitute other slices through shared contracts. B's live acceptance requires real model/reviewer/embedding and Qdrant calls. End-to-end G1-G4 require all real slices, real services and actual browser interactions; fake embeddings or a mock reviewer cannot pass those gates.
 
-Before runtime verification, C checks current service/model availability with synthetic data and verifies a permitted compute allocation/browser route. Existing old delivery evidence is not current proof. Do not run services/heavy inference on login nodes or assume authorization to send the private corpus to a new provider. Default to synthetic fixtures. Record provider, model ID and embedding dimension safely. Identify unavailable prerequisites precisely rather than fabricating success.
+Before standalone verification, each person checks their own required services/resources with synthetic data. Before G1-G4, C checks the assembled service/model availability and permitted compute allocation/browser route. Existing old delivery evidence is not current proof. Do not run services/heavy inference on login nodes or assume authorization to send the private corpus to a new provider. Default to synthetic fixtures. Record provider, model ID and embedding dimension safely. Identify unavailable prerequisites precisely rather than fabricating success.
 
-Success requires all worker acceptance cases plus the shared G1-G4 flows. The visualization content deferral and external retention limits remain explicit. This task produces specs only; it does not authorize deployment, dispatch, destructive corpus changes, or publication.
+Independent slice handoff requires S-A, S-B or S-C in `independent-testing.md` with cross-slice claims marked integration pending. Overall product success additionally requires all acceptance cases with real adapters and G1-G4. The visualization content deferral and external retention limits remain explicit. This task produces specs only; it does not authorize deployment, dispatch, destructive corpus changes, or publication.

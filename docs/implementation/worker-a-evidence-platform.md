@@ -1,10 +1,18 @@
 # Worker A — evidence, access and privacy lifecycle
 
-Read `README.md` and `architecture.md` first. Sources: production behavior §§3-4; architecture §§2-3,9-11; database sketch as design input only. Own `backend/app/evidence/`, contracts and the other A paths in the ownership table. Deliver the canonical foundation B and C consume, not a parallel UI or answer agent.
+Read `README.md`, `architecture.md` and `independent-testing.md` first. Sources: production behavior §§3-4; architecture §§2-3,9-11; database sketch as design input only. Own `backend/app/evidence/`, contracts and the other A paths in the ownership table. Deliver the canonical foundation B and C consume, not a parallel UI or answer agent.
 
-## A1 — authenticated project boundary and contract skeleton
+## S-A — independent acceptance
 
-Implement shared typed DTOs/protocols, migrations, session/password service, projects and memberships. Provide an explicit user/project bootstrap CLI without default passwords. Bind access to the authenticated user; membership role is project-scoped. Personnel and login users are separate entities. Project membership changes increment access revision and invalidate affected in-flight releases. Prevent accidental removal of the last admin unless an explicit transfer workflow exists.
+Implement A1-A4 while B/C work independently. Use the G0 contracts and `independent-testing.md`. Own fixtures under `backend/tests/evidence/` and a runner under `scripts/evidence/`; maintain shared adapter-driven conformance cases under `backend/tests/contracts/`.
+
+Run real A services, migrations and durable jobs against isolated real PostgreSQL. Inject controllable B processing/rebuild/index-removal callbacks which return contract-valid artifacts and can fail, pause or report unknown write outcomes. Supply reviewed candidates at the contract boundary to exercise real A release transactions, exact quote/digest checks and races. No B/C implementation, model service or Qdrant is required for S-A. Optional model-assisted privacy detection uses a detector substitute for deterministic cases, with real detector checks reported separately.
+
+Cover auth, source versions, job restart/retry, publication, privacy inventory and write barriers. A substitute index proves A responds correctly to reported outcomes; actual Qdrant deletion/re-embedding and complete privacy-to-model/browser behavior remain G3/G4 assertions. Record these separately.
+
+## A1 — authenticated project boundary and contract implementation
+
+Use the G0 typed DTOs/protocols and implement migrations, session/password service, projects and memberships. Provide an explicit user/project bootstrap CLI without default passwords. Bind access to the authenticated user; membership role is project-scoped. Personnel and login users are separate entities. Project membership changes increment access revision and invalidate affected in-flight releases. Prevent accidental removal of the last admin unless an explicit transfer workflow exists.
 
 Define canonical documents, records/versions, spans, restricted identities/contact aliases, occurrences, memories/dependencies, jobs/outbox, answer dependencies and generations. JSONB is acceptable for summary prose/metadata; enforce project references and version constraints in repository operations. Preserve unknown dates/identity matches rather than fabricating values. Make schema migrations repeatable.
 
@@ -52,4 +60,4 @@ Acceptance: two people named alike with different contacts/actions; erase only o
 
 Record A1-A4 evidence in `evidence-a.md`, including SQL/Qdrant versions, job IDs, interruption point and observed recovery. Unit checks alone do not establish erasure. Coordinate fixture IDs with C and handler signatures with B.
 
-> Implement Worker A in `/scratch/project_2020551/relex-0919` using this file and the shared README. Start with A1 contracts so B/C can work in parallel, then A2-A4. Preserve inherited changes and source docs. Own only A paths; request cross-owner changes. Verify access, publication and erasure using synthetic data and real stores. Record failures honestly; do not dispatch descendants or change another checkout.
+> Implement Worker A in `/mnt/relex-kai` using this file and the shared README. Start from G0 contracts; implement A1-A4 and run S-A independently while B/C implement their slices. Preserve inherited changes and source docs. Own only A paths; request cross-owner changes. Verify access, publication and erasure using synthetic data and real stores. Record failures honestly; do not dispatch descendants or change another checkout.

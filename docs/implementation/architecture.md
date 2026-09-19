@@ -1,6 +1,6 @@
 # Codebase architecture
 
-Revision 3, 2026-09-19. Applies only to `/scratch/project_2020551/relex-0919`. This is the implementation structure for the source behavior/agent docs, not a replacement for their requirements. Folder READMEs are scaffolding; application code is still to be implemented.
+Delivery plan revision 4, 2026-09-19; service contract revision 3. Authoritative workspace: `/mnt/relex-kai` on `verda`. This is the implementation structure for the source behavior/agent docs, not a replacement for their requirements. Folder READMEs are scaffolding; application code is still to be implemented.
 
 ## Structure
 
@@ -94,6 +94,16 @@ B owns provider transport shared by model roles. If A needs model-assisted priva
 
 A owns canonical ordered source spans; B owns chunking. B stages chunk descriptors (IDs, ordered span references, offsets for overlap, input hashes) through A's repository port. A's RecordPage resolves these descriptors back to canonical text and does not implement a second chunker. A provides scoped lexical candidates from canonical memory/chunk inputs; B fuses them with Qdrant candidates. This keeps SQL ownership and retrieval policy separate.
 
+## Independent construction and testing
+
+A, B and C develop concurrently from G0; follow `independent-testing.md`. Each slice accepts injected contract ports. Importing a slice or contracts must not import the other concrete slices, load production configuration, connect to services or start jobs.
+
+Production `bootstrap.py` remains the sole composition root for real A/B adapters. Test composition lives in each owner's test directory. C exposes `create_app(services)` for real routes with injected test services; importing that factory must not load production bootstrap. Browser tests exercise the actual routes and frontend, not a replacement fake HTTP application.
+
+Keep fixtures/substitutes within each slice's owned test directories. Shared adapter-driven contract cases live in `backend/tests/contracts/`; each person supplies adapter factories for its real implementation or consumer substitutes. No slice imports another's test helpers. Shared integration fixtures remain C-owned in `fixtures/implementation/`.
+
+G0 packaging provides minimal contract dependencies and independent test dependency groups. Tests collect and run with other concrete slices absent. Every runner owns unique databases/schemas, collections, ports and output directories so concurrent runs cannot reset another person's resources.
+
 ## Runtime and publication
 
 - `backend/app/main.py` creates the HTTP application; it does not launch hidden background threads or run schema migrations on every request.
@@ -135,4 +145,4 @@ Use no-store for sensitive responses, clear client state on logout/project chang
 
 ## Implementation acceptance
 
-C verifies backend import/startup and frontend build/typecheck; A/B verify their module behavior and boundary contracts. Check no cross-imports between concrete evidence/intelligence packages and no HTTP dependency inside contracts. Browser acceptance then exercises actual services, not mocked adapters. The worker specs define semantic/lifecycle cases. These folders and this document alone are not a running application.
+S-A, S-B and S-C verify their real code and boundary contracts independently; C additionally verifies frontend build/typecheck and browser behavior. Production composition/startup is checked during G1-G4. Check no cross-imports between concrete evidence/intelligence packages and no HTTP dependency inside contracts. G1-G4 browser integration acceptance exercises all real services; S-C browser acceptance uses the contract substitutes described above. The worker specs define semantic/lifecycle cases. These folders and this document alone are not a running application.
