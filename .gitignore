@@ -216,6 +216,14 @@ frontend/node_modules/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Project-local editor and frontend dependencies
+.idea/
+frontend/node_modules/
+
+# The backend serves the compiled frontend directly.
+!frontend/dist/
+!frontend/dist/**
+
 # Ruff stuff:
 .ruff_cache/
 

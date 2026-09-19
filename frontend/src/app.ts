@@ -23,10 +23,9 @@ function el<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string,cls?:strin
  const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;
 }
 function button(text:string, action:()=>unknown, cls=""){const n=el("button",text,cls);n.onclick=()=>{Promise.resolve(action()).catch(showError)};return n;}
-function pagePath(name:string){return "/"+name;}
+function pagePath(name:string,projectId=project?.id){return projectId?"/#/projects/"+encodeURIComponent(projectId)+"/"+name:"/";}
 function navigate(name:string){view=name;history.pushState({view:name},"",pagePath(name));render();}
-function routeView(projectId:string){const clean=location.pathname.match(/^\/([^/]+)\/?$/)?.[1];if(clean&&pageNames.includes(clean as typeof pageNames[number]))return clean;
- const legacy=location.hash.match(/^#\/projects\/([^/]+)\/([^/]+)$/);if(!legacy||decodeURIComponent(legacy[1])!==projectId)return "documents";return pageNames.includes(legacy[2] as typeof pageNames[number])?legacy[2]:"documents";}
+function routeView(projectId:string){const match=location.hash.match(/^#\/projects\/([^/]+)\/([^/]+)$/);if(!match||decodeURIComponent(match[1])!==projectId)return "documents";return pageNames.includes(match[2] as typeof pageNames[number])?match[2]:"documents";}
 function pageLink(name:string,selected:boolean){const link=el("a",pageLabels[name]||name,selected?"selected":"");link.href=pagePath(name);if(selected)link.setAttribute("aria-current","page");link.dataset.view=name;link.onclick=event=>{if(event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();navigate(name);};return link;}
 function input(label:string,type="text",value=""){const n=el("input");n.type=type;n.value=value;n.setAttribute("aria-label",label);n.placeholder=label;return n;}
 function select(label:string, values:[string,string][], value=""){const n=el("select");n.setAttribute("aria-label",label);for(const [v,t]of values){const o=el("option",t);o.value=v;n.append(o);}if(values.some(([v])=>v===value))n.value=value;return n;}
@@ -52,26 +51,32 @@ async function list<T>(path:string){let items:T[]=[],cursor:string|null=null;do{
  }while(cursor);return items;}
 function reset(){epoch++;clearProject();conversation=null;pending=null;questionDraft="";if(poll)window.clearInterval(poll);document.querySelector("#receipt")?.remove();}
 function render(skipView=false){
- root.className="app-shell";root.replaceChildren();const top=el("header","","topbar");const brand=el("div","","brand");brand.append(el("div","RELEX WORKSPACE","eyebrow"),el("h1","Memory With a Receipt"));top.append(brand);
- if(me){top.append(el("span",me.display_name));top.append(button("Sign out",async()=>{try{await api("/api/logout","POST");}finally{reset();clearSession();me=null;projects=[];project=null;render();}}));}
- root.append(top);const notice=el("div");notice.id="notice";notice.setAttribute("role","alert");root.append(notice);const barrier=el("div");barrier.id="barrier";barrier.setAttribute("role","status");root.append(barrier);
- if(!me){login();return;}
- const picker=select("Project",projects.map(p=>[p.id,p.name+" · "+p.role]),project?.id||"");
- picker.onchange=()=>{reset();project=projects.find(p=>p.id===picker.value)||null;history.replaceState(null,"","/");render();};
- const projectField=field("Project",picker);projectField.classList.add("project-picker");root.append(projectField);
- if(!project){root.append(el("p","No project access has been assigned to this account. Share your account ID with a project administrator: "+me.user_id));return;}
- const nav=el("nav","","workspace-nav");
- for(const name of ["documents","search","chat","overview","visualization",...(project.role==="admin"?["administration"]:[])])
- nav.append(button(name[0].toUpperCase()+name.slice(1),()=>{view=name;render();},`nav-item ${view===name?"selected":""}`));
- root.append(nav);const main=el("main","","content-shell");main.id="content";root.append(main);if(!skipView)renderView();
+ root.className="app-shell";root.replaceChildren();const top=el("header","","app-header");
+ const brand=el("div","","brand");brand.append(el("span","R","brand-mark"));const brandCopy=el("div","","brand-copy");brandCopy.append(el("h1","Relex Evidence"),el("p","Verifiable project knowledge","brand-tagline"));brand.append(brandCopy);top.append(brand);
+ if(!me){top.classList.add("auth-header");top.append(el("span","Private project workspace","auth-header-note"));}
+ if(me){const account=el("div","","account");const avatar=el("span",me.display_name.trim().slice(0,1).toUpperCase(),"account-avatar");const accountCopy=el("span","","account-copy");accountCopy.append(el("strong",me.display_name,"account-name"),el("small","Signed in","account-status"));account.append(avatar,accountCopy);account.append(button("Sign out",async()=>{try{await api("/api/logout","POST");}finally{reset();clearSession();me=null;projects=[];project=null;render();}},"button-quiet"));top.append(account);}
+ root.append(top);const notice=el("div");notice.id="notice";notice.setAttribute("role","alert");const barrier=el("div");barrier.id="barrier";barrier.setAttribute("role","status");
+ if(!me){root.append(notice,barrier);login();return;}
+ const layout=el("div","","app-layout"),sidebar=el("aside","","sidebar"),stage=el("div","","app-stage");
+ const workspace=el("section","","workspace-bar");const workspaceLabel=el("div","","workspace-label");workspaceLabel.append(el("span","CURRENT WORKSPACE","eyebrow"),el("strong",project?.name||"Choose a workspace"));workspace.append(workspaceLabel);
+ const picker=select("Project",projects.map(p=>[p.id,p.name+" · "+p.role]),project?.id||"");picker.className="project-select";
+ picker.onchange=()=>{reset();project=projects.find(p=>p.id===picker.value)||null;view="documents";history.pushState({view},"",pagePath(view,project?.id));render();};
+ workspace.append(field("Switch workspace",picker));sidebar.append(workspace);
+ if(!project){stage.append(notice,barrier,emptyState("No workspace access","Ask an administrator to grant access for account "+me.user_id+"."));layout.append(sidebar,stage);root.append(layout);return;}
+ const nav=el("nav","","primary-nav");nav.setAttribute("aria-label","Primary navigation");
+ for(const name of ["documents","search","chat","overview","visualization",...(project.role==="admin"?["administration"]:[])])nav.append(pageLink(name,view===name));
+ sidebar.append(nav);const sidebarFoot=el("div","","sidebar-foot");sidebarFoot.append(el("span",project.role.toUpperCase(),"role-badge"),el("small","Access is scoped to this workspace."));sidebar.append(sidebarFoot);
+ const main=el("main","","content-panel");main.id="content";stage.append(notice,barrier,main);layout.append(sidebar,stage);root.append(layout);if(!skipView)renderView();
 }
 function login(){
- root.className="app-shell auth-shell";const form=el("form","","auth-card"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
+ const auth=el("main","","auth-layout"),intro=el("section","","auth-intro");intro.append(el("span","RELEX EVIDENCE WORKSPACE","eyebrow"),el("h2",registering?"Join your evidence workspace.":"Work from evidence, not memory."),el("p",registering?"Create your account first. A workspace administrator can then grant access to the right projects.":"Search approved project sources, ask evidence-backed questions, and return to the exact passage behind every answer."));
+ const trust=el("div","","trust-list");for(const item of ["Project-scoped access","Reviewed answers","Exact source receipts"])trust.append(el("span",item));intro.append(trust);auth.append(intro);
+ const form=el("form","","auth-form"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
  email.autocomplete="username";email.required=true;email.maxLength=320;
  password.autocomplete=registering?"new-password":"current-password";password.required=true;password.maxLength=4096;
  name.autocomplete="name";name.required=true;name.maxLength=255;
- if(registering){password.minLength=10;form.append(el("div","Create account","form-title"),el("p","Your administrator will grant workspace access after registration.","form-description"),field("Display name",name));}
- else form.append(el("div","Welcome back","form-title"),el("p","Sign in to continue to your evidence workspace.","form-description"));
+ if(registering){password.minLength=10;form.append(el("div","Create your account","form-title"),el("p","Registration creates your identity; workspace access is granted separately.","form-description"),field("Display name",name));}
+ else form.append(el("div","Sign in","form-title"),el("p","Use the account connected to your project workspace.","form-description"));
  const submit=el("button",registering?"Create account":"Sign in");submit.type="submit";
  form.append(field("Email",email),field(registering?"Password (at least 10 characters)":"Password",password),submit);
  form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{
@@ -79,12 +84,12 @@ function login(){
  email:email.value.trim(),password:password.value,...(registering?{display_name:name.value.trim()}:{})});
  password.value="";registering=false;setCsrf(me.csrf_token);await loadProjects();
  }catch(e){showError(e);}finally{submit.disabled=false;}};
- root.append(el("div","Evidence-backed workspace","auth-kicker"),el("h1","Memory With a Receipt","auth-title"),el("p","A calm place to review project knowledge with a clear source trail.","auth-copy"),form,button(registering?"Back to sign in":"Register",()=>{registering=!registering;render();},"secondary-action"));
+ const switcher=el("div","","auth-switch");switcher.append(el("span",registering?"Already registered?":"New to Relex?"));const toggle=button(registering?"Sign in":"Create account",()=>{registering=!registering;render();},"button-link");toggle.type="button";switcher.append(toggle);form.append(switcher);auth.append(form);root.append(auth);
 }
 async function loadProjects(){projects=await list<Project>("/api/projects");const source=location.pathname.match(/^\/projects\/([^/]+)\/sources\/([^/]+)$/);
  const routeProject=location.hash.match(/^#\/projects\/([^/]+)(?:\/|$)/);
  project=(source?projects.find(p=>p.id===decodeURIComponent(source[1])):routeProject?projects.find(p=>p.id===decodeURIComponent(routeProject[1])):projects[0])||null;
- if(project&&!source){view=routeView(project.id);if(view==="administration"&&project.role!=="admin")view="documents";history.replaceState({view},"",pagePath(view));}render(!!source);
+ if(project&&!source){view=routeView(project.id);if(view==="administration"&&project.role!=="admin")view="documents";}render(!!source);
  if(source){if(!project){showError(new Error("This project is unavailable."));return;}const query=new URLSearchParams(location.search);
  await sourceView(decodeURIComponent(source[2]),Number(query.get("version")),query.get("span")||"");}}
 async function renderView(){if(poll){clearInterval(poll);poll=undefined;}document.querySelector("#receipt")?.remove();const main=root.querySelector<HTMLElement>("#content");if(!main)return;main.dataset.view=view;const mark=++epoch;main.replaceChildren(el("p","Loading…"));
@@ -102,8 +107,8 @@ async function documents(main:HTMLElement,mark:number){main.replaceChildren(page
  form.onsubmit=async e=>{e.preventDefault();const f=file.files?.[0];if(!f)return;upload.disabled=true;
  const data=new FormData();data.set("file",f);data.set("record_type",kind.value);
  try{const job=await api<Job>(base()+"/documents","POST",data);current(mark);main.append(jobRow(job));file.value="";await refreshJobs(main,mark);}catch(e){showError(e);}finally{upload.disabled=status.write_barrier;}};
- const uploadPanel=el("section","","upload-panel");uploadPanel.append(el("div","Add source material","panel-title"),el("p","Upload a UTF-8 text source and choose how it should be interpreted.","muted"),form);main.append(uploadPanel);}
- const library=el("section","","document-library");library.append(el("h2","Workspace library"));main.append(library);await pager<Models["Document"]>(library,base()+"/documents",doc=>{const row=el("article","","document-card");const meta=el("div","","card-meta");meta.append(el("span",doc.record_type,"meta-chip"),el("span",doc.ai_status,"meta-chip"),el("span",doc.processing_state,"meta-chip"));row.append(meta,el("h3",doc.title),el("p",doc.record_count+" source records","muted"));
+ main.append(form);}
+ await pager<Models["Document"]>(main,base()+"/documents",doc=>{const row=el("article","","document-card");const meta=el("div","","card-meta");meta.append(el("span",doc.record_type,"meta-chip"),el("span",doc.ai_status,"meta-chip"),el("span",doc.processing_state,"meta-chip"));row.append(meta,el("h3",doc.title),el("p",doc.record_count+" source records","muted"));
  row.append(button("Open records",async()=>{const target=el("section");row.append(target);await pager<Models["RecordSummary"]>(target,base()+"/documents/"+encodeURIComponent(doc.id)+"/records",r=>{
  const entry=el("div");entry.append(button(r.title,()=>recordView(r.record_id)));return entry;});}));
  if(project?.role==="admin"){for(const action of ["activate","deactivate","delete"]){const b=button(action[0].toUpperCase()+action.slice(1),async()=>{
@@ -131,7 +136,7 @@ async function sourceView(id:string,version:number,span:string,cursor?:string){c
  if(page.previous_cursor)main.append(button("Previous source page",()=>sourceView(id,version,span,page.previous_cursor!)));
  if(page.next_cursor)main.append(button("Next source page",()=>sourceView(id,version,span,page.next_cursor!)));
  main.querySelector("mark")?.scrollIntoView({block:"center"});
- }catch(e){if(e instanceof DOMException&&e.name==="AbortError")return;showError(e,main);main.append(button("Return to chat and regenerate",()=>navigate("chat")));}}
+ }catch(e){if(e instanceof DOMException&&e.name==="AbortError")return;showError(e,main);main.append(button("Return to chat and regenerate",()=>{view="chat";renderView();}));}}
 async function search(main:HTMLElement,mark:number){const options=await api<Models["FilterOptions"]>(base()+"/filters");current(mark);main.replaceChildren(pageHeader("Search evidence",pageDescriptions.search,"Discovery"));
  const form=el("form","","search-form"),q=input("Search query"),from=input("From date","date"),to=input("To date","date");q.maxLength=8000;q.className="search-query";
  const type=select("Record type",[["","Any type"],...options.record_types.map(x=>[x,x] as [string,string])]);
@@ -167,7 +172,7 @@ async function chat(main:HTMLElement,mark:number){main.replaceChildren(pageHeade
  current(mark);
  const form=el("form"),question=el("textarea");question.setAttribute("aria-label","Question");question.maxLength=8000;question.required=true;question.value=questionDraft;
  question.oninput=()=>{questionDraft=question.value;if(pending&&pending.question!==question.value)pending=null;};
- question.placeholder="Ask a question about this workspace's approved evidence…";const send=el("button",pending?"Retry question":"Ask question");send.type="submit";form.className="composer";form.append(question,send);thread.append(form);
+ question.placeholder="Ask a question about this workspace's approved evidence…";const send=el("button",pending?"Retry question":"Ask question");send.type="submit";form.className="composer";form.append(question,send);main.append(form);
  const status=await api<Models["ProjectStatus"]>(base()+"/status");current(mark);send.disabled=status.write_barrier;
  if(status.write_barrier)thread.append(el("p","Project cleanup is in progress. Your unsent text stays only in this tab.","banner"));
  form.onsubmit=async e=>{e.preventDefault();send.disabled=true;const processing=el("p","Finding evidence and independently reviewing the answer…");messages.append(processing);
@@ -176,16 +181,14 @@ async function chat(main:HTMLElement,mark:number){main.replaceChildren(pageHeade
  const answer=await api<Answer>(base()+"/chat","POST",pending);current(mark);processing.replaceWith(answerNode(answer));pending=null;questionDraft="";question.value="";send.textContent="Ask";
  }catch(e){processing.remove();showError(e);if(e instanceof ApiError&&(!e.retryable||["evidence_changed","answer_unavailable","idempotency_conflict"].includes(e.code)))pending=null;send.textContent=pending?"Retry question":"Ask";}finally{send.disabled=false;}};}
 async function overview(main:HTMLElement,mark:number){const data=await api<Models["Overview"]>(base()+"/overview");current(mark);main.replaceChildren(pageHeader("Project overview",pageDescriptions.overview,"Briefing"),el("span",data.state,"state-badge"));
- const briefing=el("section","","briefing-grid");main.append(briefing);if(data.state==="ready"&&!data.claims.length)briefing.append(emptyState("No briefing claims yet","The reviewed project overview will appear when sufficient eligible evidence is available."));
- if(data.state==="ready")for(const [index,claim] of data.claims.entries()){const row=el("article","","briefing-card");row.append(el("span","Finding "+(index+1),"message-label"),el("p",claim.text));for(const id of claim.receipt_ids){const b=button("View source",async()=>{
+ if(data.state==="ready")for(const claim of data.claims){const row=el("article",claim.text);for(const id of claim.receipt_ids){const b=button("View source",async()=>{
  const fresh=await api<Models["Overview"]>(base()+"/overview");if(fresh.state!=="ready"||fresh.id!==data.id)throw new Error("Overview changed. Reload it.");
  const receipt=fresh.receipts.find(r=>r.id===id);if(!receipt)throw new Error("Source unavailable.");
- const detail=el("blockquote",receipt.quote),link=el("a",receipt.source_title);link.href=sourceLink(receipt);link.target="_blank";link.rel="noopener";detail.append(link);row.append(detail);});row.append(b);}briefing.append(row);}}
+ const detail=el("blockquote",receipt.quote),link=el("a",receipt.source_title);link.href=sourceLink(receipt);link.target="_blank";link.rel="noopener";detail.append(link);row.append(detail);});row.append(b);}main.append(row);}}
 async function visualization(main:HTMLElement,mark:number){const status=await api<Models["ProjectStatus"]>(base()+"/status");current(mark);const stats=el("section","","stat-grid");for(const [value,label] of [[status.eligible_documents,"Eligible documents"],[status.eligible_records,"Eligible records"],[status.write_barrier?"Paused":"Available","Workspace writes"]]){const card=el("article","","stat-card");card.append(el("strong",String(value)),el("span",String(label)));stats.append(card);}
- const health=el("section","","health-panel"),average=status.eligible_documents?Math.round(status.eligible_records/status.eligible_documents):0;health.append(el("div","Evidence readiness","panel-title"),el("p",status.write_barrier?"Writes are paused while workspace cleanup completes.":"The workspace is ready for document ingestion and reviewed questions."),el("div","","health-track"));const fill=el("span","","health-fill");fill.style.width=status.write_barrier?"36%":"100%";health.querySelector(".health-track")?.append(fill);const detail=el("div","","health-detail");detail.append(el("strong",String(average)),el("span","Average eligible records per document"));health.append(detail);
- main.replaceChildren(pageHeader("Project status",pageDescriptions.visualization,"Workspace health"),stats,health);}
+ main.replaceChildren(pageHeader("Project status",pageDescriptions.visualization,"Workspace health"),stats,el("p","Detailed visualization modules are planned for a later release.","muted"));}
 async function administration(main:HTMLElement,mark:number){main.replaceChildren(pageHeader("Project administration",pageDescriptions.administration,"Admin tools"),el("p","Membership controls access to this workspace. Personnel associations and erasure remain separate.","section-note"));
- const adminGrid=el("div","","admin-grid"),accessPanel=el("section","","admin-panel"),peoplePanel=el("section","","admin-panel"),members=el("div");accessPanel.append(el("div","Workspace access","panel-title"),el("p","Grant or revoke project-scoped roles for registered accounts.","muted"),members);adminGrid.append(accessPanel,peoplePanel);main.append(adminGrid);
+ const members=el("section");main.append(members,el("h3","Members"));
  await pager<Models["Member"]>(members,base()+"/members",m=>{const row=el("article","","member-row");row.append(el("strong",m.display_name),el("span",m.role,"role-badge"),el("small",m.user_id));row.append(button("Remove access",async()=>{if(!confirm("Remove membership for "+m.display_name+" ("+m.user_id+") from "+project?.name+"? This does not erase their personal information."))return;await api(base()+"/members/"+encodeURIComponent(m.user_id),"DELETE");row.remove();},"button-danger"));return row;});
  const memberForm=el("form"),user=input("Registered email or account ID"),role=select("Role",[["member","Member"],["admin","Admin"]]),save=el("button","Grant or update access");save.type="submit";user.required=true;user.maxLength=320;memberForm.append(field("Registered email or account ID",user),field("Project role",role),save);
  memberForm.onsubmit=async e=>{e.preventDefault();try{const identity=user.value.trim();if(!confirm("Grant "+role.value+" access to "+identity+" in "+project?.name+"?"))return;save.disabled=true;await api(base()+"/members","POST",{...(identity.includes("@")?{email:identity}:{user_id:identity}),role:role.value});await renderView();}catch(e){showError(e);}finally{save.disabled=false;}};accessPanel.append(memberForm);peoplePanel.append(el("div","People directory","panel-title"),el("p","Associate clients and employees, or start a privacy erasure workflow.","muted"));
@@ -193,12 +196,7 @@ async function administration(main:HTMLElement,mark:number){main.replaceChildren
  const erase=button("Erase personal information",async()=>{if(!confirm("Erase personal information for "+p.display_name+" ("+p.id+") in "+project?.name+"? Project decisions will remain with [deleted user] attribution."))return;row.append(jobRow(await api<Job>(base()+"/people/"+encodeURIComponent(p.id)+"/erase","POST")));});erase.disabled=p.state==="erasing";row.append(erase);
  return row;});
  const form=el("form"),id=input("Person ID (blank for new identity)"),name=input("Display name"),kind=select("Person kind",[["client","Client"],["employee","Employee"]]),contact=input("Contact value"),contactKind=select("Contact kind",[["email","Email"],["phone","Phone"],["postal_address","Postal address"]]),add=el("button","Associate person");add.type="submit";name.maxLength=255;contact.maxLength=500;
- form.append(id,name,kind,contactKind,contact,add);form.onsubmit=async e=>{e.preventDefault();try{await api(base()+"/people","POST",{...(id.value?{person_id:id.value}:{}),display_name:name.value,kind:kind.value,contacts:contact.value?[{kind:contactKind.value,value:contact.value}]:[]});renderView();}catch(e){showError(e);}};main.append(form,el("h3","Privacy diagnostics"));
- await pager<PrivacyDiagnostic>(main,base()+"/privacy/diagnostics",diagnostic=>{const row=el("article");
-  row.append(el("strong",diagnostic.kind+" · "+diagnostic.state),el("p",diagnostic.reason),el("small","Record "+diagnostic.record_id+" · version "+diagnostic.record_version+" · span "+diagnostic.span_id+(diagnostic.start===null?"":" · offsets "+diagnostic.start+"–"+diagnostic.end)));
-  if(diagnostic.state==="open"){const resolution=select("Privacy resolution",[["organization","Organization"],["role","Operational role"],["system_code","System code"],["contact","Contact"],["personal_identifier","Personal identifier"],["private_cause","Private cause"],["bind:","Bind to existing person ID"]]);const personId=input("Existing person ID");personId.hidden=true;resolution.onchange=()=>{personId.hidden=resolution.value!=="bind:";};const resolve=button("Apply resolution",async()=>{const value=resolution.value==="bind:"?"bind:"+personId.value.trim():resolution.value;if(!confirm("Apply this source-version-bound privacy resolution? The record will be reprocessed before publication."))return;await api(base()+"/privacy/diagnostics/"+encodeURIComponent(diagnostic.id)+"/resolve","POST",{resolution:value});await renderView();});row.append(resolution,personId,resolve);}
-  return row;});
- await refreshJobs(main,mark);
+ form.append(id,name,kind,contactKind,contact,add);form.onsubmit=async e=>{e.preventDefault();try{await api(base()+"/people","POST",{...(id.value?{person_id:id.value}:{}),display_name:name.value,kind:kind.value,contacts:contact.value?[{kind:contactKind.value,value:contact.value}]:[]});renderView();}catch(e){showError(e);}};main.append(form);await refreshJobs(main,mark);
 }
 async function start(){try{me=await api<Me>("/api/me");setCsrf(me.csrf_token);await loadProjects();}catch{me=null;render();}}
 window.addEventListener("popstate",()=>{if(me){if(project)view=routeView(project.id);render();}});
