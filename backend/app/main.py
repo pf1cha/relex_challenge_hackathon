@@ -246,6 +246,8 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
     async def shell():
         if not (dist/"index.html").exists(): raise DomainError("dependency_unavailable")
         return FileResponse(dist/"index.html",headers={"Cache-Control":"no-store"})
+    for page_name in ("documents","search","chat","overview","visualization","administration"):
+        app.add_api_route(f"/{page_name}",shell,methods=["GET"],include_in_schema=False)
     @app.get("/projects/{p}/sources/{id}",include_in_schema=False)
     async def source_shell(request: Request,p: Id,id: Id,version: Annotated[int,Query(ge=1)],span: Id):
         queries(request,("version","span"))
