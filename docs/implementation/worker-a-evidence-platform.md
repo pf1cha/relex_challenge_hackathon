@@ -27,7 +27,7 @@ Acceptance: two projects with admin/member/outsider accounts; exercise every rep
 
 Handoff: typed contract imports, bootstrap instructions and seeded synthetic project IDs. B/C can proceed against these contracts immediately.
 
-Use shared contract revision 5 from `shared-interfaces.md`, including its begin/release/fail chat attempt sequence, exact DTOs and index-operation ledger. Include session identity in request context, caller-owned conversation lookup, atomic `release_answer`, restricted JobCapability and index-operation acknowledgement ports. Receipt resolution uses exact versions; changed receipts return unavailable rather than being silently remapped.
+Use shared contract revision 6 from `shared-interfaces.md`, including its begin/release/fail chat attempt sequence, exact DTOs, timeline read model and index-operation ledger. Include session identity in request context, caller-owned conversation lookup, atomic `release_answer`, restricted JobCapability and index-operation acknowledgement ports. Receipt resolution uses exact versions; changed receipts return unavailable rather than being silently remapped.
 
 ## A2 — upload to sanitized source
 

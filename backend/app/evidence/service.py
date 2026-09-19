@@ -20,6 +20,20 @@ def now(): return datetime.now(timezone.utc)
 def iso(): return now().isoformat()
 def uid(): return str(uuid.uuid4())
 def dump(value): return value.model_dump(mode="json") if hasattr(value,"model_dump") else value
+def timeline_order(item):
+    source_time=item.source_time
+    if source_time.value is None:return (1,0,0,item.record_id)
+    try:
+        if source_time.precision=="instant":
+            parsed=datetime.fromisoformat(source_time.value.replace("Z","+00:00"))
+            if parsed.tzinfo is None:parsed=parsed.replace(tzinfo=timezone.utc)
+        elif source_time.precision=="day":parsed=datetime.fromisoformat(source_time.value).replace(tzinfo=timezone.utc)
+        elif source_time.precision=="month":parsed=datetime.fromisoformat(source_time.value+"-01").replace(tzinfo=timezone.utc)
+        elif source_time.precision=="year":parsed=datetime(int(source_time.value),1,1,tzinfo=timezone.utc)
+        else:return (1,0,0,item.record_id)
+        return (0,0,parsed.timestamp(),item.record_id)
+    except (TypeError,ValueError,OverflowError):
+        return (0,1,source_time.value,item.record_id)
 def require(condition, code="contract_violation"):
     if not condition: raise DomainError(code)
 def password_hash(password, salt=None):
@@ -250,6 +264,29 @@ class EvidencePlatform:
                 except DomainError:pass
                 else:return Overview(state="ready",id=s["overview"]["id"],claims=candidate.claims,receipts=candidate.receipts,coverage=candidate.coverage,snapshot=self.snapshot(s),error_code=None)
             return Overview(state="pending",id=None,claims=[],receipts=[],coverage=None,snapshot=self.snapshot(s),error_code=None)
+    async def get_timeline(self,ctx,page):
+        async with self.transaction(ctx) as (_,s):
+            summaries={}
+            valid_memories=(stored.get("data",{}) for stored in s["memories"].values() if stored.get("valid"))
+            for memory in sorted(valid_memories,key=lambda value:(value.get("updated_at",""),value.get("id",""))):
+                if memory.get("project_id")!=ctx.project_id or memory.get("kind")!="record" or memory.get("level") not in (1,2):continue
+                for dependency in memory.get("dependencies",[]):
+                    key=(dependency.get("record_id"),dependency.get("record_version"))
+                    summaries.setdefault(key,{})[memory["level"]]={"text":memory.get("text"),"span_ids":dependency.get("span_ids",[])}
+            items=[]
+            for r in s["records"].values():
+                document=s["documents"].get(r["original_doc_id"])
+                if not document or document.get("deleted") or document.get("ai_status")!="active":continue
+                if not r.get("published") or r.get("quarantined"):continue
+                record_summaries=summaries.get((r["record_id"],r["record_version"]),{})
+                valid_span_ids={span["span_id"] for span in r.get("spans",[])}
+                summary_span_ids=next((summary["span_ids"] for level in (2,1) if (summary:=record_summaries.get(level)) and summary["span_ids"]),[])
+                linked_span_id=next((span_id for span_id in summary_span_ids if span_id in valid_span_ids),None)
+                first_span=next((span for span in r.get("spans",[]) if span["span_id"]==linked_span_id),next(iter(r.get("spans",[])),None))
+                source_url=None if first_span is None else f"/projects/{quote(ctx.project_id,safe='')}/sources/{quote(r['record_id'],safe='')}?version={r['record_version']}&span={quote(first_span['span_id'],safe='')}"
+                items.append(TimelineRecord(project_id=ctx.project_id,record_id=r["record_id"],original_doc_id=r["original_doc_id"],record_version=r["record_version"],title=r["title"],record_type=r["record_type"],source_time=r["source_time"],level1_summary=record_summaries.get(1,{}).get("text"),level2_summary=record_summaries.get(2,{}).get("text"),processed_content_url=source_url))
+            items.sort(key=timeline_order)
+            return self._page(items,page,self._binding(ctx,s,"timeline"))
     async def get_filters(self,ctx):
         async with self.transaction(ctx) as (_,s):
             rs=[]

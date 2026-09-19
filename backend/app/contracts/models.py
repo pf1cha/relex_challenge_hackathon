@@ -108,6 +108,18 @@ class RecordSummary(DTO):
     source_time: SourceTime
     total_chunks: StrictInt
 
+class TimelineRecord(DTO):
+    project_id: Id
+    record_id: Id
+    original_doc_id: Id
+    record_version: Version
+    title: str
+    record_type: RecordType
+    source_time: SourceTime
+    level1_summary: str | None
+    level2_summary: str | None
+    processed_content_url: str | None
+
 class SourceLocation(DTO):
     line_start: StrictInt | None
     line_end: StrictInt | None

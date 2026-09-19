@@ -877,6 +877,75 @@
         }
       }
     },
+    "/api/projects/{p}/timeline": {
+      "get": {
+        "summary": "Timeline",
+        "operationId": "timeline_api_projects__p__timeline_get",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_TimelineRecord_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{p}/conversations": {
       "post": {
         "summary": "Create Conversation",
@@ -1557,6 +1626,137 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{p}/privacy/diagnostics": {
+      "get": {
+        "summary": "Privacy Diagnostics",
+        "operationId": "privacy_diagnostics_api_projects__p__privacy_diagnostics_get",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_PrivacyDiagnostic_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{p}/privacy/diagnostics/{id}/resolve": {
+      "post": {
+        "summary": "Resolve Privacy",
+        "operationId": "resolve_privacy_api_projects__p__privacy_diagnostics__id__resolve_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrivacyResolutionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrivacyDiagnostic"
                 }
               }
             }
@@ -2926,6 +3126,35 @@
         ],
         "title": "Page[Person]"
       },
+      "Page_PrivacyDiagnostic_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PrivacyDiagnostic"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[PrivacyDiagnostic]"
+      },
       "Page_Project_": {
         "properties": {
           "items": {
@@ -2983,6 +3212,35 @@
           "next_cursor"
         ],
         "title": "Page[RecordSummary]"
+      },
+      "Page_TimelineRecord_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineRecord"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[TimelineRecord]"
       },
       "Person": {
         "properties": {
@@ -3074,6 +3332,125 @@
           "contacts"
         ],
         "title": "PersonInput"
+      },
+      "PrivacyDiagnostic": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "record_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Record Id"
+          },
+          "record_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Record Version"
+          },
+          "span_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Span Id"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "person",
+              "organization",
+              "role",
+              "contact",
+              "personal_identifier",
+              "contextual_circumstance",
+              "uncertain"
+            ],
+            "title": "Kind"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved"
+            ],
+            "title": "State"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "record_id",
+          "record_version",
+          "span_id",
+          "kind",
+          "reason",
+          "state",
+          "updated_at"
+        ],
+        "title": "PrivacyDiagnostic"
+      },
+      "PrivacyResolutionInput": {
+        "properties": {
+          "resolution": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Resolution"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "resolution"
+        ],
+        "title": "PrivacyResolutionInput"
       },
       "Project": {
         "properties": {
@@ -3683,6 +4060,27 @@
               }
             ],
             "title": "Timestamp Label"
+          },
+          "speaker_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speaker Label"
+          },
+          "provenance": {
+            "type": "string",
+            "enum": [
+              "original",
+              "quoted",
+              "forwarded"
+            ],
+            "title": "Provenance",
+            "default": "original"
           }
         },
         "additionalProperties": false,
@@ -3830,6 +4228,98 @@
           "source_location"
         ],
         "title": "Span"
+      },
+      "TimelineRecord": {
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Project Id"
+          },
+          "record_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Record Id"
+          },
+          "original_doc_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Original Doc Id"
+          },
+          "record_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Record Version"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "record_type": {
+            "type": "string",
+            "enum": [
+              "email",
+              "transcript",
+              "report",
+              "specification"
+            ],
+            "title": "Record Type"
+          },
+          "source_time": {
+            "$ref": "#/components/schemas/SourceTime"
+          },
+          "level1_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level1 Summary"
+          },
+          "level2_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level2 Summary"
+          },
+          "processed_content_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Processed Content Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "project_id",
+          "record_id",
+          "original_doc_id",
+          "record_version",
+          "title",
+          "record_type",
+          "source_time",
+          "level1_summary",
+          "level2_summary",
+          "processed_content_url"
+        ],
+        "title": "TimelineRecord"
       },
       "ValidationError": {
         "properties": {

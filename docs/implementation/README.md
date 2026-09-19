@@ -1,6 +1,6 @@
 # Three-worker implementation plan
 
-Status: delivery plan revision 4, 2026-09-19. Three people implement and test A, B and C concurrently. Policy defaults remain proposals; service contract revision 5 expands the shared interfaces without changing the required product behavior. Read `architecture.md` for code layout, `shared-interfaces.md` and `http-api.md` for interface details, and `independent-testing.md` for standalone acceptance.
+Status: delivery plan revision 4, 2026-09-19. Three people implement and test A, B and C concurrently. Policy defaults remain proposals; service contract revision 6 expands the shared interfaces with the project timeline. Read `architecture.md` for code layout, `shared-interfaces.md` and `http-api.md` for interface details, and `independent-testing.md` for standalone acceptance.
 
 This plan does not rely on another checkout's code or delivery contract.
 
@@ -41,7 +41,7 @@ These choices make interfaces implementable. Keep them explicit in the handoff; 
 5. Members cannot browse inactive documents. Admin may inspect current sanitized inactive sources. Old answers with invalid dependencies become unavailable; the delivery contract chooses unavailable/regenerate for changed receipt versions rather than automatic remapping. Superseded decisions remain historical evidence while their sources remain active.
 6. Initial import formats: UTF-8 bundled emails, text reports, transcripts. Unsupported formats fail visibly. PDF/OCR is deferred. Preserve title/file identity and source boundaries; sanitize identifying metadata as part of privacy processing.
 7. Adopt proposed ingestion removal of residence addresses and non-work private discussion, preserving supported work constraints. Uncertain identity matches or uncertain sensitive spans quarantine the record with an admin recovery path; never silently merge same-name people.
-8. Visualization deliverable is project selector and explicitly labeled processing/status information. Actual visualization content remains an open product decision and is not completed by this placeholder.
+8. Overview includes a project-scoped active-record timeline with source time, record type, L1/L2 discovery summaries and canonical source links. Broader aggregate visualization remains an open product decision.
 9. Retained raw/intermediate uploads are restricted and included in the erasure inventory. Corpus input originals outside application-managed storage are not edited. External provider retention/backups must be inventoried as limits; do not promise erasure outside controlled stores.
 
 ## Ownership: three parallel implementation slices
@@ -56,7 +56,7 @@ These are target ownership paths; inspect the current checkout before implementa
 
 ## Parallel execution and integration gates
 
-- **G0 — shared starter before parallel implementation:** Check in importable revision 5 DTOs/protocols/errors, contract examples/conformance cases and minimal packaging with per-slice test dependencies. A owns contract files and C packaging; this bounded setup requires no completed A1 or production implementation. The prose below alone is not a completed starter. See `independent-testing.md` for readiness.
+- **G0 — shared starter before parallel implementation:** Check in importable revision 6 DTOs/protocols/errors, contract examples/conformance cases and minimal packaging with per-slice test dependencies. A owns contract files and C packaging; this bounded setup requires no completed A1 or production implementation. The prose below alone is not a completed starter. See `independent-testing.md` for readiness.
 - **S-A / S-B / S-C — concurrent independent development:** All three people implement and test their real slice using substitutes at the other slices' contract boundaries. Each owns fixtures, runner and isolated resources. Tests must run without the other concrete implementations, C's production bootstrap or another person's development server. These setups support independent implementation-ready handoff. Behavioral verification uses real services, and G1-G4 establish the assembled product.
 - **G1 — first vertical flow:** C accepts an admin upload; A persists a sanitized staged record under a job-scoped internal capability; B reads that staged version, creates memories and indexes it; A verifies dependencies and publishes the coherent version; C opens the source as a member. Staged records are never member/agent-readable. Verify outsider denial. A and B jointly validate the real durable job handler interface for G1; their standalone job tests proceed independently.
 - **G2 — reviewed chat:** B supplies search and answer service; C exposes it and renders claim receipts; A supplies final eligibility validation. Run the long-record and chronology cases in Worker B's spec.
@@ -65,7 +65,7 @@ These are target ownership paths; inspect the current checkout before implementa
 
 After G0, A1-A4, B1-B4 and C1-C4 proceed concurrently. No standalone test or slice handoff waits for another implementation or shared integration fixtures. G1-G4 are separate integration gates, run as real adapters become available. Shared contract changes require a coordinated version update. Coordinator resolves cross-owner changes.
 
-## Shared contract revision 5
+## Shared contract revision 6
 
 The detailed contract is defined in:
 
@@ -84,4 +84,4 @@ Each worker records commands, exit status, relevant IDs/versions, observed outco
 
 Before standalone verification, each person checks their own required services/resources with synthetic data. Before G1-G4, C checks the assembled service/model availability and permitted compute allocation/browser route. Existing old delivery evidence is not current proof. Do not run services/heavy inference on login nodes or assume authorization to send the private corpus to a new provider. Default to synthetic fixtures. Record provider, model ID and embedding dimension safely. Identify unavailable prerequisites precisely rather than fabricating success.
 
-Independent implementation-ready handoff uses S-A, S-B or S-C in `independent-testing.md` with all unexecuted real-service claims marked pending. Overall product success additionally requires all acceptance cases with real adapters and G1-G4. The visualization content deferral and external retention limits remain explicit. This task produces specs only; it does not authorize deployment, dispatch, destructive corpus changes, or publication.
+Independent implementation-ready handoff uses S-A, S-B or S-C in `independent-testing.md` with all unexecuted real-service claims marked pending. Overall product success additionally requires all acceptance cases with real adapters and G1-G4. The broader visualization-content deferral and external retention limits remain explicit. This task produces specs only; it does not authorize deployment, dispatch, destructive corpus changes, or publication.

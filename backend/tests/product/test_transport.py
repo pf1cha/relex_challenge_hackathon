@@ -28,3 +28,19 @@ async def test_real_route_orders_begin_answer_release_and_withholds_on_failure()
         assert denied.status_code==403
         assert (await client.get("/api/projects/fixture-project/documents?unknown=1")).status_code==422
         assert (await client.get("/api/projects/another-project/documents")).status_code==404
+
+
+@pytest.mark.asyncio
+async def test_timeline_route_is_project_authorized():
+    fixture=FixtureServices()
+    app=create_app(fixture.services(),HttpSettings(secure_cookie=False,allow_loopback_http=True))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://127.0.0.1:18080") as client:
+        headers={"Origin":"http://127.0.0.1:18080"}
+        login=await client.post("/api/login",json={"email":"fixture@synthetic.invalid","password":"synthetic-password"},headers=headers)
+        assert login.status_code==200
+
+        timeline=await client.get("/api/projects/fixture-project/timeline")
+
+        assert timeline.status_code==200
+        assert timeline.json()["items"][0]["level2_summary"]=="A fuller fixture summary."
+        assert (await client.get("/api/projects/another-project/timeline")).status_code==404
