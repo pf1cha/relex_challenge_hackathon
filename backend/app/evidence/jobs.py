@@ -8,7 +8,7 @@ from ..contracts.errors import DomainError
 from ..contracts.hashing import compact, artifact_key
 from .service import now,iso,uid,dump,require
 from .parsing import parse
-from .privacy import normalize
+from .privacy import normalize, person_occurs
 
 SEQUENCES={
 "ingest":["received","parsed","privacy_ready","extracted","indexed","published"],
@@ -28,11 +28,56 @@ class Jobs:
         require(j and j["public"]["state"]=="running" and j["lease_token"]==lease.lease_token and j["expires_at"] and datetime.fromisoformat(j["expires_at"])>now(),"lease_lost")
         require(j["lifecycle_revision"]==s["lifecycle_revision"],"capability_denied")
         return j
+    def _reschedule_stale(self,s):
+        """Fence old attempts, then preserve accepted independent document work."""
+        for j in list(s["jobs"].values()):
+            p=j["public"]
+            if j["lifecycle_revision"]==s["lifecycle_revision"] or p["state"]=="completed":
+                continue
+            if p["state"]=="failed" and p["error_code"]!="superseded":
+                continue
+            p.update(state="failed",error_code="superseded",retryable=False,updated_at=iso())
+            j["lease_token"]=None;j["expires_at"]=None
+            docs=[s["documents"].get(did) for did in j["work"]["document_ids"]]
+            # A later command owns that document's state. Erasure may have removed
+            # restricted input; such work cannot be silently reconstructed.
+            owned=bool(docs) and all(d and d["latest_job_id"]==p["id"] for d in docs)
+            if owned:
+                for d in docs:d["processing_state"]="failed"
+            if s["write_barrier"] or j.get("rescheduled_to") or j.get("resumption_forbidden") or not owned:
+                continue
+            if p["kind"] not in ("ingest","activate","deactivate") or any(d.get("deleted") or d["ai_status"]!=("inactive" if p["kind"]=="deactivate" else "active") for d in docs):
+                continue
+            if p["kind"]=="ingest" and p["stage"] in ("received","parsed") and any("raw" not in d for d in docs):
+                continue
+            refs=j["work"]["record_versions"]
+            if any(ref["record_id"] not in s["records"] or s["records"][ref["record_id"]]["record_version"]!=ref["record_version"] for ref in refs):
+                continue
+            operations=[op for op in s["operations"].values() if op["public"]["job_id"]==p["id"]]
+            # No new writer can race an unresolved old network call. Late reports
+            # still use the old completion ticket, while old SQL tokens stay dead.
+            if any(op["public"]["state"] in ("in_flight","unknown") for op in operations):
+                continue
+            for op in operations:
+                if op["public"]["state"]=="pending":
+                    op["public"]["state"]="failed"
+                    op["outcome"]=dict(state="failed",completed_entry_ids=[],error_code="superseded",observed_at=iso())
+            removal=sorted(set(j["work"]["removal_entry_ids"]) | {eid for op in operations if op["public"]["action"]=="upsert" for eid in op["public"]["entry_ids"]})
+            replacement=self.p._new_job(s,p["project_id"],p["kind"],docs=j["work"]["document_ids"],refs=refs,removals=removal)
+            fresh=s["jobs"][replacement.id]
+            if p["kind"]=="ingest":
+                fresh["public"]["stage"]=p["stage"] if p["stage"] in ("received","parsed") else "privacy_ready"
+            # Old checkpoints remain ineligible; the new job has its own checkpoint
+            # keys and publication generation, after removing obsolete external IDs.
+            j["rescheduled_to"]=replacement.id
+            for d in docs:d.update(latest_job_id=replacement.id,processing_state="pending",updated_at=iso())
+
     async def claim(self,worker_id,kinds):
         async with self.p.db.connection() as c:
             rows=await (await c.execute("SELECT id,data FROM projects ORDER BY created_at,id FOR UPDATE SKIP LOCKED")).fetchall()
             for row in rows:
                 s=row["data"]
+                self._reschedule_stale(s)
                 for j in s["jobs"].values():
                     p=j["public"]
                     if p["kind"] not in kinds:continue
@@ -74,6 +119,7 @@ class Jobs:
     async def fail(self,lease,code,retryable):
         def apply(s,j):
             j["public"].update(state="failed",error_code=code,retryable=retryable,updated_at=iso())
+            self.p._recoverable_cleanup(j)
             for did in j["work"]["document_ids"]:
                 if did in s["documents"]:s["documents"][did]["processing_state"]="failed"
             return Job.model_validate(j["public"])
@@ -136,7 +182,7 @@ class Jobs:
                     if set(operation["public"]["entry_ids"]) & set(j["work"]["removal_entry_ids"]):
                         operation["input"]["entries"] = []
                 for pid in j["work"]["person_ids"]:
-                    require(not any(pid in compact(r) for r in s["records"].values()),"contract_violation")
+                    require(not any(person_occurs(r,pid,s["people"]) for r in s["records"].values()),"contract_violation")
                     s["people"].pop(pid,None)
                 s["write_barrier"]=False
             j["public"].update(state="completed",stage=seq[-1],error_code=None,retryable=False,updated_at=iso())
@@ -201,6 +247,7 @@ class Jobs:
                     s["documents"][r["original_doc_id"]]["title"]=r["title"]
                 if unresolved:
                     j["public"].update(state="failed",error_code="privacy_unresolved",retryable=True,updated_at=iso())
+                    for did in j["work"]["document_ids"]:s["documents"][did]["processing_state"]="failed"
                     return self._lease(j)
                 j["public"].update(stage="privacy_ready",updated_at=iso())
             return self._lease(j)
@@ -237,11 +284,14 @@ class Jobs:
                     record_ids=set()
                     for pid in person_ids:
                         for rid,r in s["records"].items():
-                            if pid not in r["person_ids"] and pid not in compact(r):continue
+                            if not person_occurs(r,pid,s["people"]):continue
+                            normalized=[normalize(sp["text"],s["people"]) for sp in r["spans"]]
+                            title=normalize(r["title"],s["people"])
+                            require(not title.ambiguous and not any(value.ambiguous for value in normalized),"ambiguous_person")
                             record_ids.add(rid)
                             r["record_version"]+=1;r["published"]=False;r["quarantined"]=False
-                            r["title"]=r["title"].replace(pid,"[deleted user]")
-                            for sp in r["spans"]:sp["text"]=sp["text"].replace(pid,"[deleted user]")
+                            r["title"]=title.text.replace(pid,"[deleted user]")
+                            for sp,value in zip(r["spans"],normalized):sp["text"]=value.text.replace(pid,"[deleted user]")
                             r["person_ids"]=[x for x in r["person_ids"] if x!=pid]
                             r.pop("raw_spans",None);r.pop("source_hash",None)
                             r["chunk_ids"]=[];r["entry_ids"]=[]
@@ -253,6 +303,7 @@ class Jobs:
                     for job in s["jobs"].values():
                         if job is not j and job["public"]["state"]!="completed" and job["public"]["kind"]=="ingest":
                             job["public"].update(state="failed",error_code="superseded",retryable=False)
+                            job["resumption_forbidden"]=True
                             for did in job["work"]["document_ids"]:
                                 if did in s["documents"]:s["documents"][did]["processing_state"]="failed"
                     for pid in person_ids:
@@ -261,7 +312,7 @@ class Jobs:
                             if msg.get("text"):
                                 result=normalize(msg["text"],s["people"])
                                 msg["text"]=result.text.replace(pid,"[deleted user]")
-                        for d in s["documents"].values():d["title"]=d["title"].replace(pid,"[deleted user]")
+                        for d in s["documents"].values():d["title"]=normalize(d["title"],s["people"]).text.replace(pid,"[deleted user]")
                     j["work"]["record_versions"]=[dump(RecordVersionRef(record_id=rid,record_version=s["records"][rid]["record_version"])) for rid in sorted(record_ids)]
                 # All answers are current-state cached material, invalidated above and erased now.
                 s["answers"]={};s["attempts"]={}
@@ -344,6 +395,14 @@ async def run_once(platform,handlers,worker_id="worker"):
     beat=asyncio.create_task(heartbeat())
     try:
         kind=lease.job.kind;results=[]
+        if kind in ("ingest","activate") and lease.work.removal_entry_ids:
+            removed=await jobs._mutate(lease,lambda s,j:j.get("obsolete_index_removed",False))
+            if not removed:
+                cap=await jobs.capability(lease,lease.job.stage)
+                await handlers.remove_index_entries(cap,lease.work.removal_entry_ids)
+                # Commit before any replacement upsert. A later restart must not
+                # delete a replacement that reused an immutable point ID.
+                await jobs._mutate(lease,lambda s,j:j.update(obsolete_index_removed=True))
         if kind=="ingest":
             while lease.job.stage in ("received","parsed"):
                 lease=await jobs.prepare_ingestion(lease)

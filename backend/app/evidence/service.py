@@ -13,7 +13,7 @@ from psycopg.types.json import Jsonb
 from ..contracts.models import *
 from ..contracts.errors import DomainError
 from ..contracts.hashing import compact, candidate_digest, make_entry_id, artifact_key
-from .privacy import normalize
+from .privacy import normalize, person_occurs
 from .parsing import parse
 
 def now(): return datetime.now(timezone.utc)
@@ -329,22 +329,39 @@ class EvidencePlatform:
             if existing:return existing
             require(not s["write_barrier"],"write_barrier")
             s["write_barrier"]=True;s["people"][person_id]["state"]="erasing";self._invalidate(s,privacy=True,lifecycle=True)
-            affected=[r for r in s["records"].values() if person_id in r["person_ids"] or person_id in compact(r)]
+            affected=[r for r in s["records"].values() if person_occurs(r,person_id,s["people"])]
             for r in affected:r["quarantined"]=True
             job=self._new_job(s,ctx.project_id,"erase_person",docs=sorted({r["original_doc_id"] for r in affected}),people=[person_id],removals=[e for r in affected for e in r["entry_ids"]])
             return job
 
+    @staticmethod
+    def _recoverable_cleanup(j):
+        # Reclassify legacy provider-shape failures without replacing inventory.
+        # Retry still performs every validation and never releases the barrier early.
+        p=j["public"]
+        if p["state"]=="failed" and p["kind"] in ("erase_person","delete_document") and p["stage"]=="rebuilding" and p["error_code"]=="contract_violation":
+            p["retryable"]=True
+
     async def list_jobs(self,ctx,page):
         async with self.transaction(ctx,admin=True) as (_,s):
-            items=sorted([Job.model_validate(x["public"]) for x in s["jobs"].values()],key=lambda x:(x.created_at,x.id))
+            items=[]
+            for job in s["jobs"].values():
+                view={"public":dict(job["public"])}
+                self._recoverable_cleanup(view)
+                items.append(Job.model_validate(view["public"]))
+            items=sorted(items,key=lambda x:(x.created_at,x.id))
             return self._page(items,page,self._binding(ctx,s,"jobs"))
     async def get_job(self,ctx,job_id):
         async with self.transaction(ctx,admin=True) as (_,s):
-            require(job_id in s["jobs"],"not_found");return Job.model_validate(s["jobs"][job_id]["public"])
+            require(job_id in s["jobs"],"not_found")
+            view={"public":dict(s["jobs"][job_id]["public"])}
+            self._recoverable_cleanup(view)
+            return Job.model_validate(view["public"])
     async def retry_job(self,ctx,job_id):
         async with self.transaction(ctx,admin=True) as (_,s):
             require(job_id in s["jobs"],"not_found");j=s["jobs"][job_id];p=j["public"]
             if p["state"]=="completed":return Job.model_validate(p)
+            self._recoverable_cleanup(j)
             require(p["state"]=="failed" and p["retryable"],"invalid_input")
             require(j["lifecycle_revision"]==s["lifecycle_revision"],"evidence_changed")
             p.update(state="pending",error_code=None,retryable=False,updated_at=iso());j["lease_token"]=None
