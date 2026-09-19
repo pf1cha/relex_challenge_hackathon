@@ -1,0 +1,151 @@
+[
+  {
+    "id": "B-C1",
+    "records": [
+      "2026-09-01: PERSON_A and PERSON_B agreed to launch in October.",
+      "2026-09-10: PERSON_A proposed November instead. No acceptance is recorded."
+    ],
+    "question": "What launch was agreed?",
+    "expected": [
+      "October agreement",
+      "November proposal"
+    ],
+    "prohibited": [
+      "November agreed"
+    ]
+  },
+  {
+    "id": "B-C2",
+    "records": [
+      "2026-09-01: Both parties agree October launch effective 2026-09-01.",
+      "2026-09-10: Both parties explicitly replace October with November effective 2026-09-10."
+    ],
+    "question": "What was agreed as of 2026-09-05, and as of 2026-09-15?",
+    "expected": [
+      "September 5 October",
+      "September 15 November"
+    ],
+    "prohibited": [
+      "upload order authority"
+    ]
+  },
+  {
+    "id": "B-C3",
+    "records": [
+      "2026-09-01 report: Everyone agreed October.",
+      "2026-09-10 correction: The reported October agreement never happened. The report was incorrect."
+    ],
+    "question": "Was October ever agreed?",
+    "expected": [
+      "never happened",
+      "incorrect report"
+    ],
+    "prohibited": [
+      "previously valid agreement"
+    ]
+  },
+  {
+    "id": "B-C4",
+    "records": [
+      "2026-09-10 decision ingested first: Both parties replace October with November effective 2026-09-10.",
+      "2026-09-01 original ingested second: Both parties agreed October effective 2026-09-01."
+    ],
+    "question": "What is the current launch date?",
+    "expected": [
+      "November"
+    ],
+    "prohibited": [
+      "October current because uploaded later"
+    ]
+  },
+  {
+    "id": "B-C5",
+    "records": [
+      "2026-09-01: Launch discussion deferred. No budget was discussed."
+    ],
+    "question": "What budget amount and owner were agreed?",
+    "expected": [
+      "cannot establish"
+    ],
+    "prohibited": [
+      "invented number",
+      "invented owner"
+    ]
+  },
+  {
+    "id": "B-C6",
+    "records": [
+      "2026-09-01: Both parties agree launch in October.",
+      "2026-09-02: Both parties agree launch in November. No replacement or authority rule is recorded."
+    ],
+    "question": "What launch was agreed?",
+    "expected": [
+      "unresolved conflict",
+      "October",
+      "November"
+    ],
+    "prohibited": [
+      "November automatically governs"
+    ]
+  },
+  {
+    "id": "B-C7",
+    "records": [
+      "2026-09-01: Finland launch agreed for October.",
+      "2026-09-02: Sweden launch agreed for November."
+    ],
+    "question": "What launch was agreed in Finland and Sweden?",
+    "expected": [
+      "Finland October",
+      "Sweden November"
+    ],
+    "prohibited": [
+      "Sweden supersedes Finland"
+    ]
+  },
+  {
+    "id": "B-C8",
+    "records": [
+      "2026-09-01 forward from PERSON_B: Quoted original PERSON_A: I propose October launch. No acceptance recorded.",
+      "2026-09-02 duplicate forward of PERSON_A proposal for October. No acceptance recorded."
+    ],
+    "question": "Who proposed October and who agreed?",
+    "expected": [
+      "PERSON_A proposal",
+      "acceptance unknown"
+    ],
+    "prohibited": [
+      "PERSON_B original proposer",
+      "duplicate is acceptance"
+    ]
+  },
+  {
+    "id": "B-C9",
+    "records": [
+      "Unknown effective date: October launch was discussed as an option.",
+      "Late qualification: Approval depends on capacity verification; verification and acceptance are not recorded."
+    ],
+    "question": "What is the current agreed launch?",
+    "expected": [
+      "unknown effective date",
+      "condition",
+      "cannot establish"
+    ],
+    "prohibited": [
+      "October current commitment"
+    ]
+  },
+  {
+    "id": "B-OWNER",
+    "records": [
+      "2026-09-01: PERSON_A mentioned PERSON_B during launch discussion. Ownership remains unassigned."
+    ],
+    "question": "Is PERSON_B the owner?",
+    "expected": [
+      "owner unknown"
+    ],
+    "prohibited": [
+      "mention means owner"
+    ]
+  }
+]
