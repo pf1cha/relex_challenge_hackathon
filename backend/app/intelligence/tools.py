@@ -10,11 +10,12 @@ from .retrieval import snapshot
 class BudgetExhausted(Exception):pass
 
 class ToolSession:
-    def __init__(self,owner,ctx,limits,deadline,rounds):
+    def __init__(self,owner,ctx,limits,deadline,rounds,*,progressive=True):
         self.owner,self.ctx,self.limits,self.deadline=owner,ctx,limits,deadline
-        self.round_limit=rounds
+        self.round_limit,self.progressive=rounds,progressive
         self.calls=self.pages=self.tokens=self.searches=0
         self.records={};self.spans={};self.dependencies={};self.results=[];self.trace=[]
+        self.discovered_records=set();self.level2_records=set();self.source_records=set();self.source_searches=0
         self.exhausted=False;self.pending_searches=set();self.pending_histories=set()
 
     def check(self):
@@ -39,20 +40,33 @@ class ToolSession:
 
     async def _call(self,name,args):
         self.check();self.calls+=1
-        allowed={"search_memory":{"query","filters","cursor"},"read_record":{"record_id","cursor"},
-          "read_memory":{"memory_id"},"get_decision_history":{"topic_id","scope","as_of","cursor"},
+        allowed={"search_memory":{"query","filters","cursor"},"search_sources":{"query","filters","cursor"},"read_record":{"record_id","cursor"},
+          "read_memory":{"memory_id","record_id"},"get_decision_history":{"topic_id","scope","as_of","cursor"},
           "expand_context":{"record_id","span_id"}}
         if name not in allowed or not isinstance(args,dict) or set(args)-allowed[name]:raise DomainError("invalid_input")
         if name=="search_memory":
             if self.searches>=self.round_limit:self.exhausted=True;raise BudgetExhausted()
             self.searches+=1
-            result=await self.owner.search_memory(self.ctx,SearchInput(query=args["query"],filters=SearchFilters(**args.get("filters",{})),page=PageRequest(cursor=args.get("cursor"),limit=25)))
+            result=await self.owner.search_agent_memory(self.ctx,SearchInput(query=args["query"],filters=SearchFilters(**args.get("filters",{})),page=PageRequest(cursor=args.get("cursor"),limit=25)))
             self.account(result,page=True)
             query_key=(args["query"],str(args.get("filters",{})))
             if result.next_cursor:self.pending_searches.add(query_key)
             else:self.pending_searches.discard(query_key)
             trace_ids=[x.record.record_id for x in result.items]
+            self.discovered_records.update(trace_ids)
+        elif name=="search_sources":
+            if self.searches>=self.round_limit:self.exhausted=True;raise BudgetExhausted()
+            self.searches+=1
+            self.source_searches+=1
+            result=await self.owner.search_sources(self.ctx,SearchInput(query=args["query"],filters=SearchFilters(**args.get("filters",{})),page=PageRequest(cursor=args.get("cursor"),limit=25)))
+            self.account(result,page=True)
+            query_key=("source",args["query"],str(args.get("filters",{})))
+            if result.next_cursor:self.pending_searches.add(query_key)
+            else:self.pending_searches.discard(query_key)
+            trace_ids=[x.record.record_id for x in result.items]
+            self.source_records.update(trace_ids)
         elif name=="read_record":
+            if self.progressive and args["record_id"] not in self.source_records:raise DomainError("invalid_input")
             result=await self.owner.reader.read_record(self.ctx,args["record_id"],PageRequest(cursor=args.get("cursor"),limit=10))
             self.account(result,page=True)
             page=result.record_page
@@ -65,7 +79,17 @@ class ToolSession:
             self.dependencies.setdefault(key,set()).update(s.span_id for s in page.spans)
             trace_ids=page.returned_chunk_ids
         elif name=="read_memory":
-            result=await self.owner.reader.read_memory(self.ctx,args["memory_id"]);self.account(result)
+            if set(args)=={"memory_id"}:
+                if self.progressive:raise DomainError("invalid_input")
+                result=await self.owner.reader.read_memory(self.ctx,args["memory_id"])
+            elif set(args)=={"record_id"}:
+                if self.progressive and args["record_id"] not in self.discovered_records:raise DomainError("invalid_input")
+                page=await self.owner.reader.read_record(self.ctx,args["record_id"],PageRequest(limit=1))
+                result=next((memory for memory in page.memories if memory.level==2 and memory.kind=="record"),None)
+                if result is None:raise DomainError("not_found")
+                self.level2_records.add(args["record_id"])
+            else:raise DomainError("invalid_input")
+            self.account(result)
             for dep in result.dependencies:self.dependencies.setdefault((dep.record_id,dep.record_version),set()).update(dep.span_ids)
             trace_ids=[result.id]
         elif name=="get_decision_history":
@@ -93,18 +117,18 @@ class ToolSession:
         return result
 
     async def discover(self,query):
-        hits=await self.call("search_memory",{"query":query})
-        for hit in hits.items:
-            key=(hit.record.record_id,hit.record.record_version)
-            prior=self.records.get(key)
-            # A fresh scoped search revalidates eligibility; already supplied whole records need no duplicate source packet.
-            if prior and prior["start"] and prior["end"] and len(prior["chunks"])==prior["summary"].total_chunks:
-                continue
-            cursor=None
-            while True:
-                page=await self.call("read_record",{"record_id":hit.record.record_id,"cursor":cursor})
-                cursor=page.record_page.next_cursor
-                if cursor is None:break
+        # Discovery is intentionally L1-only. The agent decides whether to issue
+        # an explicit source search or read a selected record afterward.
+        await self.call("search_memory",{"query":query})
+
+    def retrieval_state(self):
+        layers=["L1"] if self.discovered_records else []
+        if self.level2_records:layers.append("L2")
+        if self.spans:layers.append("L3")
+        return {"layers_seen":layers,"l1_record_ids":sorted(self.discovered_records),
+            "l2_record_ids":sorted(self.level2_records),"source_searches":self.source_searches,
+            "l3_record_ids":sorted({key[0] for key in self.records}),
+            "remaining_search_rounds":max(0,self.round_limit-self.searches)}
 
     def coverage(self):
         records=[RecordCoverage(record_id=key[0],record_version=key[1],total_chunks=r["summary"].total_chunks,

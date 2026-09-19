@@ -30,7 +30,7 @@ class Retrieval:
             return value["offset"]
         except (ValueError,KeyError,TypeError):raise DomainError("stale_cursor") from None
 
-    async def search(self,ctx,input):
+    async def search(self,ctx,input,*,include_source=True):
         if not 1<=len(input.query)<=8000:raise DomainError("invalid_input")
         normalized=await self.reader.normalize_query(ctx,input.query)
         if normalized.ambiguous:raise DomainError("ambiguous_person")
@@ -77,7 +77,7 @@ class Retrieval:
             from app.contracts.models import PageRequest
             memory=await self.reader.read_record(ctx,x.record.record_id,PageRequest(limit=1))
             description=next((m.text for m in memory.memories if m.level==1 and m.kind=="record"), "")
-            hits.append(SearchHit(record=x.record,description=description,snippet=x.snippet,matched_span_ids=x.span_ids))
+            hits.append(SearchHit(record=x.record,description=description,snippet=x.snippet if include_source else "",matched_span_ids=x.span_ids if include_source else []))
         return SearchPage(items=hits,
             next_cursor=self._encode({"binding":binding,"offset":next_offset}) if next_offset<len(rows) else None,
             snapshot=snapshot(ctx))

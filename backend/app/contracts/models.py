@@ -416,6 +416,12 @@ class SearchPage(DTO):
     next_cursor: str | None
     snapshot: Snapshot
 
+class RetrievalAssessment(DTO):
+    verdict: Literal['sufficient', 'insufficient']
+    missing_context: list[str]
+    suggested_queries: list[str]
+    suggested_record_ids: list[Id]
+
 class ReviewResult(DTO):
     claim_id: Id
     verdict: Literal['pass', 'fail']
@@ -434,6 +440,7 @@ class ReviewedCandidate(DTO):
     review_results: list[ReviewResult]
     candidate_digest: Digest
     omission_proof: OmissionProof | None
+    retrieval_review: RetrievalAssessment | None = None
 
 class OmissionProof(DTO):
     reviewed: ReviewedPayload

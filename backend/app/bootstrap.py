@@ -47,7 +47,7 @@ def build_runtime(settings: RuntimeSettings | None = None) -> Runtime:
         timeout_seconds=min(120,settings.http.request_timeout_seconds)))
     index=QdrantIndex(settings.qdrant_url,settings.collection,settings.qdrant_key)
     evidence.privacy_agent = PrivacyAgent(provider)
-    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=2,
+    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=3,
         reviewer_search_rounds=3,tool_calls_per_phase=int(os.environ.get("RELEX_TOOL_CALLS_PER_PHASE","24")),
         pages_per_phase=int(os.environ.get("RELEX_PAGES_PER_PHASE","24")),
         source_tokens_per_phase=int(os.environ.get("RELEX_SOURCE_TOKENS_PER_PHASE","24000")),

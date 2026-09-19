@@ -520,6 +520,7 @@ class EvidencePlatform:
             require(coverage.total_chunks==len(r["chunk_ids"]) and set(coverage.supplied_chunk_ids)<=set(r["chunk_ids"]))
             require(not coverage.complete or set(coverage.supplied_chunk_ids)==set(r["chunk_ids"]))
         if not candidate.claims:require(not candidate.receipts);return
+        require(candidate.retrieval_review and candidate.retrieval_review.verdict=="sufficient")
         reviewed=candidate;results=candidate.review_results;digest=candidate.candidate_digest
         if candidate.omission_proof:
             proof=candidate.omission_proof;reviewed=proof.reviewed;results=proof.review_results;digest=proof.reviewed_digest

@@ -69,7 +69,7 @@ async def main():
         report("R-A2/R-A3/R-A4","BLOCKED",reason="real B adapter absent");return 2
     provider=ModelProvider(ProviderSettings(base_url=env.get("RELEX_MODEL_BASE_URL",""),model=env.get("RELEX_MODEL_NAME",""),api_key=(env.get("RELEX_MODEL_API_KEY") or env.get("OPENAI_API_KEY","")),embedding_base_url=env.get("RELEX_EMBEDDING_BASE_URL",""),embedding_model=env.get("RELEX_EMBEDDING_MODEL",""),embedding_api_key=(env.get("RELEX_EMBEDDING_API_KEY") or env.get("OPENAI_API_KEY","")),timeout_seconds=120))
     index=QdrantIndex(env.get("RELEX_QDRANT_URL","http://127.0.0.1:16333"),schema,env.get("RELEX_QDRANT_API_KEY",""))
-    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=2,reviewer_search_rounds=3,tool_calls_per_phase=24,pages_per_phase=24,source_tokens_per_phase=24000,request_deadline_seconds=120)
+    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=3,reviewer_search_rounds=3,tool_calls_per_phase=24,pages_per_phase=24,source_tokens_per_phase=24000,request_deadline_seconds=180)
     b=Intelligence(p.reader,p.retrieval,p.artifacts,p.ledger,provider,index,limits,p.secret)
     async def work(job):
         for _ in range(20):

@@ -172,9 +172,10 @@ The application establishes authenticated user ID, selected project, permitted r
 
 | Tool | Purpose |
 | --- | --- |
-| `search_memory(query, filters)` | Search concatenated descriptions, summaries, and source content using hybrid search; no memory-level selector |
-| `read_record(record_id, cursor=None)` | Fetch the current privacy-safe text and associated memories for all chunks of a selected record in source order; paginate long records |
-| `read_memory(memory_id)` | Read a prose or bullet-point summary and its source references |
+| `search_memory(query, filters)` | Return level 1 descriptions and record identifiers for discovery; no level 2 summary or level 3 source text is exposed |
+| `read_memory(record_id)` | Read the selected record's level 2 prose or bullet-point summary and its source references |
+| `search_sources(query, filters)` | Search level 3 source candidates and return privacy-safe matched snippets and span identifiers |
+| `read_record(record_id, cursor=None)` | After source search and selection, fetch the current privacy-safe text for all chunks of that record in source order; paginate long records |
 | `get_decision_history(topic_id, scope, as_of)` | Inspect candidate agreements, changes, corrections, and unresolved conflicts |
 | `expand_context(record_id, span_id)` | Read preceding/following turns or linked messages |
 
@@ -183,20 +184,23 @@ All tools enforce project membership, activation, privacy state, and version eli
 ### 6.3 Retrieval loop
 
 1. Identify what the user is asking: current state, historical state, attribution, timeline, or document lookup.
-2. Search the combined level 1 description, level 2 summary, and level 3 content through one hybrid search interface. The agent does not select memory levels.
-3. Expand selected records to all sibling chunks and read their level 3 content, using ordered batches for long records.
-4. For decision questions, retrieve related history and inspect later revisions, corrections, scope, and agreement evidence.
-5. Expand context when a short excerpt omits a condition, speaker, or acceptance.
-6. Build an evidence packet containing proposed claims, supporting spans, relevant counterevidence, and the corpus generation.
-7. Draft the answer as structured claims with receipt IDs, then submit it to review.
+2. Search level 1 descriptions. The first agent-visible retrieval result contains descriptions and record identifiers only.
+3. Let the agent decide which candidates warrant a level 2 summary (`read_memory`) or level 3 investigation (`search_sources`). Do not automatically place level 2 or level 3 content in the prompt.
+4. After a source search, explicitly read selected records and all sibling chunks in ordered batches. A source-search snippet helps selection but does not independently support a final claim.
+5. For decision questions, retrieve related history and inspect later revisions, corrections, scope, and agreement evidence.
+6. Expand context when a short excerpt omits a condition, speaker, or acceptance.
+7. Build an evidence packet containing proposed claims, supporting spans, relevant counterevidence, and the corpus generation.
+8. Draft the answer as structured claims with receipt IDs, then submit it to review.
+
+This is progressive disclosure by memory level: L1 is supplied first, L2 and L3 are separate agent choices, and canonical L3 spans enter the model context only through explicit source tools. Internal candidate ranking may use maintained indexes, but hidden L2/L3 text must not leak into an L1 tool result.
 
 A current-state answer requires more than finding one old agreement. The agent must check related changes; if coverage is insufficient, it states that it cannot establish the current answer. It may answer the supported parts without filling gaps with guesses.
 
-Proposed initial bounds: up to three retrieval rounds and one review-driven repair cycle, configurable after measuring behavior. On budget exhaustion, return only verified supported content or a clear inability to establish the answer. Do not loop indefinitely.
+Initial bounds allow up to three retrieval rounds and two review-driven answer-agent repair cycles. Each shallow finalization attempt is shown explicit retrieval state and may be continued when L2/L3 tools remain available. On budget exhaustion, return only verified supported content or a clear inability to establish the answer. Do not loop indefinitely.
 
 ## 7. Grounding reviewer and release gate
 
-The reviewer receives the user's question, drafted claims, canonical source passages, relevant decision history, and counterevidence. It does not receive the answer agent's private reasoning. It has read-only evidence tools so it can investigate missing context instead of merely accepting the answer agent's selection.
+The reviewer is tool-free. It receives the user's question, drafted claims, receipts, and the exact L1/L2/L3 retrieval packet assembled by the answer agent, but no answer-agent reasoning. It first returns a structured sufficiency judgment for that retrieval, then evaluates each claim against the retrieved canonical sources. It diagnoses missing context and suggests focused queries or record IDs; it never retrieves or rewrites the answer itself.
 
 For every claim, check:
 
@@ -207,11 +211,11 @@ For every claim, check:
 - Is a stale decision being presented as current, or a corrected record repeated as true?
 - Does the citation cover every factual clause it is attached to?
 
-Return structured results: claim ID, `pass` or `fail`, reason code, affected receipt IDs, and a repair request. Example reasons: `missing_support`, `attribution_mismatch`, `proposal_as_agreement`, `missing_condition`, `stale_as_current`, or `citation_mismatch`. These are review outcomes, not new product terminology.
+Return a structured retrieval assessment (`sufficient` or `insufficient`, missing context, suggested queries and record IDs) plus per-claim results: claim ID, `pass` or `fail`, reason code, affected receipt IDs, and a repair request. Example reasons: `missing_support`, `attribution_mismatch`, `proposal_as_agreement`, `missing_condition`, `stale_as_current`, or `citation_mismatch`. These are review outcomes, not new product terminology.
 
 Application checks independently verify that spans exist, quotes match the published source representation, and all dependencies remain accessible. A reviewer is an additional quality check, not a proof of correctness.
 
-If review fails, allow one targeted retrieval/revision cycle and review the revised claims. After that, omit failed claims or return an inability to establish the requested answer. If the reviewer is unavailable, do not publish unreviewed generated factual claims as verified answers.
+If review fails, pass only the structured feedback to the answer agent. Allow up to two targeted retrieval/revision cycles, with a fresh tool-free review after each revision. After the third review, omit failed claims or return an inability to establish the requested answer. If the reviewer is unavailable, do not publish unreviewed generated factual claims as verified answers.
 
 Before release, recheck permissions, activation, and privacy generation. Restart or invalidate an answer if its evidence changed during processing. Only after this check may the application resolve permitted person references and render receipts. Do not stream unreviewed factual answer text to the user.
 

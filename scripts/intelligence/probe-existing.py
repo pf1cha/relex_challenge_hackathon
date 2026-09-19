@@ -29,7 +29,7 @@ async def main():
     principal=SessionPrincipal(user_id=session['user_id'],session_id=session['id'],expires_at=session['expires_at']);ctx=await p.authorize(principal,pid)
     provider=ModelProvider(ProviderSettings(base_url=cfg.get('RELEX_MODEL_BASE_URL') or '',model=cfg.get('RELEX_MODEL_NAME') or '',api_key=cfg.get('RELEX_MODEL_API_KEY') or cfg.get('OPENAI_API_KEY') or '',embedding_base_url=cfg.get('RELEX_EMBEDDING_BASE_URL') or '',embedding_model=cfg.get('RELEX_EMBEDDING_MODEL') or '',embedding_api_key=cfg.get('RELEX_EMBEDDING_API_KEY') or cfg.get('OPENAI_API_KEY') or ''))
     index=QdrantIndex(cfg.get('RELEX_QDRANT_URL') or 'http://127.0.0.1:16333',original['collection'],cfg.get('RELEX_QDRANT_API_KEY') or '')
-    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=2,reviewer_search_rounds=3,tool_calls_per_phase=50,pages_per_phase=40,source_tokens_per_phase=120000,request_deadline_seconds=240)
+    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=3,reviewer_search_rounds=3,tool_calls_per_phase=50,pages_per_phase=40,source_tokens_per_phase=120000,request_deadline_seconds=300)
     service=Intelligence(p.reader,p.retrieval,p.artifacts,p.ledger,provider,index,limits,(folder/'secret').read_bytes())
     result={'run_id':args.run_id,'project_id':pid,'started_at':datetime.now(timezone.utc).isoformat(),'substitutes':[]}
     try:
@@ -99,7 +99,7 @@ async def main():
             records=await p.list_records(ctx,document.id,PageRequest(limit=100));assert len(records.items)==2
             from app.intelligence.tools import ToolSession
             for record in records.items:
-                session=ToolSession(service,ctx,limits,datetime.now(timezone.utc)+timedelta(seconds=180),3);cursor=None
+                session=ToolSession(service,ctx,limits,datetime.now(timezone.utc)+timedelta(seconds=180),3,progressive=False);cursor=None
                 while True:
                     page=await session.call('read_record',{'record_id':record.record_id,'cursor':cursor});cursor=page.record_page.next_cursor
                     if cursor is None:break
