@@ -1,6 +1,7 @@
 [Unit]
 Description=Relex PostgreSQL
 After=network.target
+PartOf=relex.target
 
 [Service]
 Type=notify

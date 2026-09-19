@@ -2,6 +2,7 @@
 Description=Apply Relex database migrations
 Requires=relex-postgres.service
 After=relex-postgres.service
+PartOf=relex.target
 
 [Service]
 Type=oneshot

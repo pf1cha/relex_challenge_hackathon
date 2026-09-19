@@ -96,8 +96,46 @@ def person_occurs(record, person_id, people):
 class PrivacyAgent:
     """Mandatory bounded semantic classification with deterministic validation."""
     policy_version = "privacy-r3"
-    prompt_version = "privacy-plan-v2"
+    prompt_version = "privacy-plan-v3-structured"
     max_batch_codepoints = 24000
+    response_schema = {
+        "name": "privacy_plan_batch", "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "complete": {"type": "boolean"},
+                "covered_span_ids": {"type": "array", "items": {"type": "string"}},
+                "entities": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {
+                        "span_id": {"type": "string"}, "start": {"type": "integer"},
+                        "end": {"type": "integer"},
+                        "kind": {"type": "string", "enum": ["person", "organization", "role", "contact", "personal_identifier", "contextual_circumstance", "uncertain"]},
+                        "identity_hint": {"type": ["string", "null"]},
+                        "evidence_span_ids": {"type": "array", "items": {"type": "string"}},
+                        "expected_text": {"type": "string"},
+                        "confidence": {"type": "string", "enum": ["certain", "uncertain"]},
+                    },
+                    "required": ["span_id", "start", "end", "kind", "identity_hint", "evidence_span_ids", "expected_text", "confidence"],
+                    "additionalProperties": False,
+                }},
+                "edits": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {
+                        "span_id": {"type": "string"}, "start": {"type": "integer"},
+                        "end": {"type": "integer"}, "expected_text": {"type": "string"},
+                        "replacement": {"type": "string"},
+                        "reason": {"type": "string", "enum": ["identity", "contact", "private_cause", "personal_identifier", "contextual_risk"]},
+                    },
+                    "required": ["span_id", "start", "end", "expected_text", "replacement", "reason"],
+                    "additionalProperties": False,
+                }},
+                "unresolved_reasons": {"type": "array", "items": {"type": "string"}},
+            },
+            "required": ["complete", "covered_span_ids", "entities", "edits", "unresolved_reasons"],
+            "additionalProperties": False,
+        },
+    }
     _personal_id = re.compile(r"(?<!\w)OP_ID\s*:?\s*[A-Za-z0-9-]+(?!\w)", re.I)
     _temporal = re.compile(r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|today|tomorrow|until|through|by)\b|\b\d{4}-\d{2}(?:-\d{2})?\b", re.I)
 
@@ -230,7 +268,8 @@ class PrivacyAgent:
             request["validation_error"]=error
             request["instruction"]="Correct the rejected output once; do not change or omit source coverage."
         try:
-            return await self.provider.generate("privacy",system,request,max_tokens=8192)
+            return await self.provider.generate("privacy",system,request,max_tokens=8192,
+                                                json_schema=self.response_schema)
         except Exception:
             raise DomainError("provider_unavailable") from None
 

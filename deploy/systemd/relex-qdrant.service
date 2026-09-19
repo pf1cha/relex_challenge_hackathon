@@ -1,6 +1,7 @@
 [Unit]
 Description=Relex Qdrant
 After=network.target
+PartOf=relex.target
 
 [Service]
 Type=simple

@@ -4,7 +4,24 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 cd "$ROOT"
 [[ $(id -u) == 0 ]] || { echo 'Run as root.' >&2; exit 1; }
 
+systemctl stop relex-web.service relex-worker.service relex-migrate.service relex-qdrant.service relex-postgres.service 2>/dev/null || true
 bash scripts/product/start.sh --prepare-only
+# Hand the owned stores from the foreground launcher to systemd without two
+# processes competing for the same data directory and ports.
+pg_ctl="$ROOT/.tools/pg/usr/lib/postgresql/18/bin/pg_ctl"
+pg_data="$ROOT/.runtime/c-postgres/data"
+if [[ -x $pg_ctl && -f $pg_data/postmaster.pid ]]; then
+    pg_owner=$(stat -c %U "$pg_data")
+    if [[ $(id -un) == "$pg_owner" ]]; then "$pg_ctl" -D "$pg_data" stop -m fast -w
+    else runuser -u "$pg_owner" -- "$pg_ctl" -D "$pg_data" stop -m fast -w
+    fi
+fi
+qdrant_pid=$(ss -ltnp 'sport = :16333' 2>/dev/null | sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -1)
+if [[ -n $qdrant_pid ]]; then
+    kill -TERM "$qdrant_pid"
+    for _ in {1..30}; do kill -0 "$qdrant_pid" 2>/dev/null || break; sleep 1; done
+    kill -0 "$qdrant_pid" 2>/dev/null && { echo 'Qdrant did not stop cleanly.' >&2; exit 1; }
+fi
 install -d -m 0700 /etc/relex
 RELEX_ROOT=$ROOT "$ROOT/.tools/miniforge3/envs/relex/bin/python" - <<'PY'
 import os, shlex
@@ -31,5 +48,5 @@ os.chmod("/etc/relex/relex.env",0o600)
 PY
 install -m 0644 deploy/systemd/relex*.service deploy/systemd/relex.target /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable relex.target
-echo 'Installed relex.target. Stop the current foreground demo, then run: systemctl start relex.target'
+systemctl enable --now relex.target
+echo 'Installed and started relex.target.'

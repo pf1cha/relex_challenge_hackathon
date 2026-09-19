@@ -198,8 +198,8 @@ cython_debug/
 frontend/node_modules/
 
 # FastAPI serves the production browser bundle from this tracked directory.
-!frontend/dist/
-!frontend/dist/**
+# !frontend/dist/
+# !frontend/dist/**
 
 # Abstra
 #   Abstra is an AI-powered process automation framework.

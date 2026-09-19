@@ -17,6 +17,13 @@ class CorrectingProvider:
 
     async def generate(self, role, system, payload, **kwargs):
         self.calls += 1
+        schema = kwargs["json_schema"]
+        entity = schema["schema"]["properties"]["entities"]["items"]
+        assert schema["strict"] is True
+        assert "confidence" in entity["required"]
+        assert entity["properties"]["kind"]["enum"] == [
+            "person", "organization", "role", "contact", "personal_identifier",
+            "contextual_circumstance", "uncertain"]
         if self.calls == 1:
             return {"complete": False, "covered_span_ids": [], "entities": [], "edits": [], "unresolved_reasons": []}
         span = payload["spans"][0]

@@ -2,6 +2,7 @@
 Description=Relex web application
 Requires=relex-migrate.service relex-qdrant.service
 After=relex-migrate.service relex-qdrant.service
+PartOf=relex.target
 
 [Service]
 Type=simple
