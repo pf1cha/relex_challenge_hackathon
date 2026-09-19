@@ -30,6 +30,8 @@ function pageLink(name:string,selected:boolean){const link=el("a",pageLabels[nam
 function input(label:string,type="text",value=""){const n=el("input");n.type=type;n.value=value;n.setAttribute("aria-label",label);n.placeholder=label;return n;}
 function select(label:string, values:[string,string][], value=""){const n=el("select");n.setAttribute("aria-label",label);for(const [v,t]of values){const o=el("option",t);o.value=v;n.append(o);}if(values.some(([v])=>v===value))n.value=value;return n;}
 function field(label:string,node:HTMLElement){const wrap=el("label",label,"field");wrap.append(node);return wrap;}
+function pageHeader(title:string,description:string,eyebrow="Workspace"){const header=el("header","","page-header");header.append(el("span",eyebrow,"eyebrow"),el("h2",title),el("p",description,"page-description"));return header;}
+function emptyState(title:string,description:string){const state=el("div","","empty-state");state.append(el("strong",title),el("p",description));return state;}
 function locationLabel(location:Models["SourceLocation"]){return [
  location.line_start!==null?"Line "+location.line_start+(location.line_end!==location.line_start?"–"+location.line_end:""):"",
  location.paragraph!==null?"Paragraph "+location.paragraph:"",
@@ -51,6 +53,7 @@ function reset(){epoch++;clearProject();conversation=null;pending=null;questionD
 function render(skipView=false){
  root.className="app-shell";root.replaceChildren();const top=el("header","","app-header");
  const brand=el("div","","brand");brand.append(el("span","R","brand-mark"));const brandCopy=el("div","","brand-copy");brandCopy.append(el("h1","Relex Evidence"),el("p","Verifiable project knowledge","brand-tagline"));brand.append(brandCopy);top.append(brand);
+ if(!me){top.classList.add("auth-header");top.append(el("span","Private project workspace","auth-header-note"));}
  if(me){const account=el("div","","account");const avatar=el("span",me.display_name.trim().slice(0,1).toUpperCase(),"account-avatar");const accountCopy=el("span","","account-copy");accountCopy.append(el("strong",me.display_name,"account-name"),el("small","Signed in","account-status"));account.append(avatar,accountCopy);account.append(button("Sign out",async()=>{try{await api("/api/logout","POST");}finally{reset();clearSession();me=null;projects=[];project=null;render();}},"button-quiet"));top.append(account);}
  root.append(top);const notice=el("div");notice.id="notice";notice.setAttribute("role","alert");const barrier=el("div");barrier.id="barrier";barrier.setAttribute("role","status");
  if(!me){root.append(notice,barrier);login();return;}
@@ -66,12 +69,14 @@ function render(skipView=false){
  const main=el("main","","content-panel");main.id="content";stage.append(notice,barrier,main);layout.append(sidebar,stage);root.append(layout);if(!skipView)renderView();
 }
 function login(){
- root.className="app-shell auth-shell";const form=el("form","","auth-card"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
+ const auth=el("main","","auth-layout"),intro=el("section","","auth-intro");intro.append(el("span","RELEX EVIDENCE WORKSPACE","eyebrow"),el("h2",registering?"Join your evidence workspace.":"Work from evidence, not memory."),el("p",registering?"Create your account first. A workspace administrator can then grant access to the right projects.":"Search approved project sources, ask evidence-backed questions, and return to the exact passage behind every answer."));
+ const trust=el("div","","trust-list");for(const item of ["Project-scoped access","Reviewed answers","Exact source receipts"])trust.append(el("span",item));intro.append(trust);auth.append(intro);
+ const form=el("form","","auth-form"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
  email.autocomplete="username";email.required=true;email.maxLength=320;
  password.autocomplete=registering?"new-password":"current-password";password.required=true;password.maxLength=4096;
  name.autocomplete="name";name.required=true;name.maxLength=255;
- if(registering){password.minLength=10;form.append(el("div","Create account","form-title"),el("p","Your administrator will grant workspace access after registration.","form-description"),field("Display name",name));}
- else form.append(el("div","Welcome back","form-title"),el("p","Sign in to continue to your evidence workspace.","form-description"));
+ if(registering){password.minLength=10;form.append(el("div","Create your account","form-title"),el("p","Registration creates your identity; workspace access is granted separately.","form-description"),field("Display name",name));}
+ else form.append(el("div","Sign in","form-title"),el("p","Use the account connected to your project workspace.","form-description"));
  const submit=el("button",registering?"Create account":"Sign in");submit.type="submit";
  form.append(field("Email",email),field(registering?"Password (at least 10 characters)":"Password",password),submit);
  form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;try{
@@ -79,7 +84,7 @@ function login(){
  email:email.value.trim(),password:password.value,...(registering?{display_name:name.value.trim()}:{})});
  password.value="";registering=false;setCsrf(me.csrf_token);await loadProjects();
  }catch(e){showError(e);}finally{submit.disabled=false;}};
- root.append(el("div","Evidence-backed workspace","auth-kicker"),el("h1","Memory With a Receipt","auth-title"),el("p","A calm place to review project knowledge with a clear source trail.","auth-copy"),form,button(registering?"Back to sign in":"Register",()=>{registering=!registering;render();},"secondary-action"));
+ const switcher=el("div","","auth-switch");switcher.append(el("span",registering?"Already registered?":"New to Relex?"));const toggle=button(registering?"Sign in":"Create account",()=>{registering=!registering;render();},"button-link");toggle.type="button";switcher.append(toggle);form.append(switcher);auth.append(form);root.append(auth);
 }
 async function loadProjects(){projects=await list<Project>("/api/projects");const source=location.pathname.match(/^\/projects\/([^/]+)\/sources\/([^/]+)$/);
  const routeProject=location.hash.match(/^#\/projects\/([^/]+)(?:\/|$)/);
