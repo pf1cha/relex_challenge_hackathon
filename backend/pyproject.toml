@@ -9,8 +9,8 @@ requires-python = ">=3.11"
 dependencies = ["pydantic>=2.10,<3"]
 
 [project.optional-dependencies]
-evidence = ["psycopg[binary]>=3.2,<4"]
-intelligence = ["httpx>=0.28,<1"]
+evidence = ["psycopg[binary]>=3.2,<4", "python-dotenv>=1,<2"]
+intelligence = ["httpx>=0.28,<1", "python-dotenv>=1,<2"]
 product = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1", "python-multipart>=0.0.20", "httpx>=0.28,<1", "python-dotenv>=1,<2"]
 test = ["pytest>=8", "pytest-asyncio>=0.25"]
 

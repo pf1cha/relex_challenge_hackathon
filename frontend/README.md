@@ -1,5 +1,14 @@
-# Frontend
+# Browser product
 
-Separate TypeScript browser application with its own dependency manifest, build and interaction tests. Source belongs under `src/`; feature modules cover authentication, documents, search, chat, source receipts, administration and the visualization entry point.
+Node.js 22 and npm are required. From this directory run `npm ci`, `npm run generate`, and `npm run build`.
+Types in src/api/schema.d.ts are generated from the actual FastAPI OpenAPI export; never edit them by hand.
+From repository root run scripts/product/generate-client.sh after route/DTO changes and inspect regeneration drift.
 
-Use backend HTTP APIs and generated OpenAPI types. Do not access SQL, Qdrant or model providers directly or include private keys in browser assets. See [codebase architecture](../docs/implementation/architecture.md) and [Worker C](../docs/implementation/worker-c-product.md). Application code and build tooling are not implemented yet.
+The browser uses same-origin cookie/CSRF protected APIs. No database/provider configuration belongs in frontend builds.
+Production composition serves frontend/dist. For Vite development, run npm run dev and include its loopback origin
+in RELEX_TRUSTED_ORIGINS. Source deep links are backed by independently authenticated APIs.
+Private project data stays in memory; no localStorage, service worker or private browser cache is used.
+
+The browser verification driver is scripts/product/browser-live.mjs, launched by scripts/product/verify-live.sh
+against real A/B services. Playwright Chromium must be installed (`npx playwright install chromium`).
+Tests and fixture results do not establish real backend acceptance.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 from pathlib import Path
+from contextlib import asynccontextmanager
 from typing import Annotated
 from fastapi import FastAPI, Request, Response, Depends, Query, UploadFile, File, Form
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
@@ -22,6 +23,16 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
 
     @app.middleware("http")
     async def safety(request, call_next):
+        # Reject declared oversized multipart bodies before Starlette spools them.
+        # Exact file-byte enforcement remains in the route and canonical service.
+        if request.method == "POST" and request.url.path.endswith("/documents"):
+            length = request.headers.get("content-length")
+            if length:
+                try:
+                    if int(length) > settings.upload_limit_bytes + 65536:
+                        return error_response("upload_too_large")
+                except ValueError:
+                    return error_response("invalid_input")
         try:
             async with asyncio.timeout(settings.request_timeout_seconds):
                 response = await call_next(request)
@@ -208,10 +219,13 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
     if (dist/"assets").is_dir():
         app.mount("/assets",StaticFiles(directory=dist/"assets"),name="assets")
     @app.get("/",include_in_schema=False)
-    @app.get("/projects/{p}/sources/{id}",include_in_schema=False)
     async def shell():
         if not (dist/"index.html").exists(): raise DomainError("dependency_unavailable")
         return FileResponse(dist/"index.html",headers={"Cache-Control":"no-store"})
+    @app.get("/projects/{p}/sources/{id}",include_in_schema=False)
+    async def source_shell(request: Request,p: Id,id: Id,version: Annotated[int,Query(ge=1)],span: Id):
+        queries(request,("version","span"))
+        return await shell()
     return app
 
 def production_app():
@@ -220,4 +234,9 @@ def production_app():
     app=create_app(runtime.services,runtime.settings.http)
     app.state.runtime=runtime
     app.state.readiness=runtime.readiness
+    @asynccontextmanager
+    async def lifespan(app):
+        try: yield
+        finally: await runtime.close()
+    app.router.lifespan_context=lifespan
     return app
