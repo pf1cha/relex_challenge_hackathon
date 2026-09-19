@@ -14,7 +14,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string,cls?:strin
 function button(text:string, action:()=>unknown, cls=""){const n=el("button",text,cls);n.onclick=()=>{Promise.resolve(action()).catch(showError)};return n;}
 function input(label:string,type="text",value=""){const n=el("input");n.type=type;n.value=value;n.setAttribute("aria-label",label);n.placeholder=label;return n;}
 function select(label:string, values:[string,string][], value=""){const n=el("select");n.setAttribute("aria-label",label);for(const [v,t]of values){const o=el("option",t);o.value=v;n.append(o);}if(values.some(([v])=>v===value))n.value=value;return n;}
-function field(label:string,node:HTMLElement){const wrap=el("label",label);wrap.append(node);return wrap;}
+function field(label:string,node:HTMLElement){const wrap=el("label",label,"field");wrap.append(node);return wrap;}
 function locationLabel(location:Models["SourceLocation"]){return [
  location.line_start!==null?"Line "+location.line_start+(location.line_end!==location.line_start?"–"+location.line_end:""):"",
  location.paragraph!==null?"Paragraph "+location.paragraph:"",
@@ -34,21 +34,21 @@ async function list<T>(path:string){let items:T[]=[],cursor:string|null=null;do{
  }while(cursor);return items;}
 function reset(){epoch++;clearProject();conversation=null;pending=null;questionDraft="";if(poll)window.clearInterval(poll);document.querySelector("#receipt")?.remove();}
 function render(skipView=false){
- root.replaceChildren();const top=el("header");top.append(el("h1","Memory With a Receipt"));
+ root.className="app-shell";root.replaceChildren();const top=el("header","","topbar");const brand=el("div","","brand");brand.append(el("div","RELEX WORKSPACE","eyebrow"),el("h1","Memory With a Receipt"));top.append(brand);
  if(me){top.append(el("span",me.display_name));top.append(button("Sign out",async()=>{try{await api("/api/logout","POST");}finally{reset();clearSession();me=null;projects=[];project=null;render();}}));}
  root.append(top);const notice=el("div");notice.id="notice";notice.setAttribute("role","alert");root.append(notice);const barrier=el("div");barrier.id="barrier";barrier.setAttribute("role","status");root.append(barrier);
  if(!me){login();return;}
  const picker=select("Project",projects.map(p=>[p.id,p.name+" · "+p.role]),project?.id||"");
  picker.onchange=()=>{reset();project=projects.find(p=>p.id===picker.value)||null;history.replaceState(null,"","/");render();};
- root.append(field("Project",picker));
+ const projectField=field("Project",picker);projectField.classList.add("project-picker");root.append(projectField);
  if(!project){root.append(el("p","No project access has been assigned to this account. Share your account ID with a project administrator: "+me.user_id));return;}
- const nav=el("nav");
+ const nav=el("nav","","workspace-nav");
  for(const name of ["documents","search","chat","overview","visualization",...(project.role==="admin"?["administration"]:[])])
- nav.append(button(name[0].toUpperCase()+name.slice(1),()=>{view=name;render();},view===name?"selected":""));
- root.append(nav);const main=el("main");main.id="content";root.append(main);if(!skipView)renderView();
+ nav.append(button(name[0].toUpperCase()+name.slice(1),()=>{view=name;render();},`nav-item ${view===name?"selected":""}`));
+ root.append(nav);const main=el("main","","content-shell");main.id="content";root.append(main);if(!skipView)renderView();
 }
 function login(){
- const form=el("form"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
+ root.className="app-shell auth-shell";const form=el("form","","auth-card"),email=input("Email","email"),password=input("Password","password"),name=input("Display name");
  email.autocomplete="username";email.required=true;email.maxLength=320;
  password.autocomplete=registering?"new-password":"current-password";password.required=true;password.maxLength=4096;
  name.autocomplete="name";name.required=true;name.maxLength=255;
@@ -60,7 +60,7 @@ function login(){
  email:email.value.trim(),password:password.value,...(registering?{display_name:name.value.trim()}:{})});
  password.value="";registering=false;setCsrf(me.csrf_token);await loadProjects();
  }catch(e){showError(e);}finally{submit.disabled=false;}};
- root.append(form,button(registering?"Back to sign in":"Register",()=>{registering=!registering;render();}));
+ root.append(el("div","Evidence-backed workspace","auth-kicker"),el("h1","Memory With a Receipt","auth-title"),el("p","A calm place to review project knowledge with a clear source trail.","auth-copy"),form,button(registering?"Back to sign in":"Register",()=>{registering=!registering;render();},"secondary-action"));
 }
 async function loadProjects(){projects=await list<Project>("/api/projects");const source=location.pathname.match(/^\/projects\/([^/]+)\/sources\/([^/]+)$/);
  project=(source?projects.find(p=>p.id===decodeURIComponent(source[1])):projects[0])||null;render(!!source);
