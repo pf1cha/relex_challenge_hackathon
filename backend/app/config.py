@@ -24,6 +24,7 @@ class RuntimeSettings:
     http: HttpSettings
     secret: str = field(repr=False)
     database_url: str = field(repr=False, default="")
+    restricted_database_url: str = field(repr=False, default="")
     qdrant_url: str = ""
     qdrant_key: str = field(repr=False, default="")
     collection: str = "relex"
@@ -48,6 +49,7 @@ class RuntimeSettings:
                 int(e.get("RELEX_REQUEST_TIMEOUT_SECONDS", "180")),
                 e.get("RELEX_FRONTEND_DIST", "frontend/dist")),
             secret=secret, database_url=e.get("RELEX_DATABASE_URL", ""),
+            restricted_database_url=e.get("RELEX_RESTRICTED_DATABASE_URL", ""),
             qdrant_url=e.get("RELEX_QDRANT_URL", ""), qdrant_key=e.get("RELEX_QDRANT_API_KEY", ""),
             collection=e.get("RELEX_QDRANT_COLLECTION", "relex"),
             model_url=e.get("RELEX_MODEL_BASE_URL", "https://api.openai.com/v1"),

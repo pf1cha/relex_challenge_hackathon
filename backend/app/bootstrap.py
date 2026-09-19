@@ -38,7 +38,8 @@ def build_runtime(settings: RuntimeSettings | None = None) -> Runtime:
     from app.intelligence.qdrant import QdrantIndex
     from app.intelligence.service import Intelligence
     settings=settings or RuntimeSettings.from_env()
-    db=Postgres(settings.database_url,schema=os.environ.get("RELEX_DATABASE_SCHEMA","relex"))
+    db=Postgres(settings.database_url,schema=os.environ.get("RELEX_DATABASE_SCHEMA","relex"),
+        restricted_dsn=settings.restricted_database_url)
     evidence=EvidencePlatform(db,settings.secret,upload_limit_bytes=settings.http.upload_limit_bytes,
         request_deadline_seconds=settings.http.request_timeout_seconds)
     provider=ModelProvider(ProviderSettings(base_url=settings.model_url,model=settings.model_name,

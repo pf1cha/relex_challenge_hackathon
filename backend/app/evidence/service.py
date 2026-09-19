@@ -68,7 +68,7 @@ class EvidencePlatform:
     async def bootstrap_project(self,name,admin_id,project_id=None):
         project_id=project_id or uid();s=fresh_state()
         s["members"][admin_id]=dict(role="admin",revision=1,granted_at=iso())
-        async with self.db.connection() as c:
+        async with self.db.connection(restricted=True) as c:
             require(await (await c.execute("SELECT id FROM users WHERE id=%s",(admin_id,))).fetchone(),"not_found")
             await c.execute("INSERT INTO projects(id,name,data) VALUES(%s,%s,%s) ON CONFLICT(id) DO NOTHING",(project_id,name,Jsonb(s)))
             await self.sync_relational(c,project_id,s,restricted=True)
@@ -118,11 +118,11 @@ class EvidencePlatform:
             return RequestContext(user_id=principal.user_id,session_id=principal.session_id,project_id=project_id,role=membership["role"],access_revision=membership["access_revision"],**dump(self.snapshot(state)))
 
     @asynccontextmanager
-    async def transaction(self,ctx,admin=False,write=False,fresh=False):
-        async with self.db.connection() as c:
+    async def transaction(self,ctx,admin=False,write=False,fresh=False,restricted=False):
+        async with self.db.connection(restricted=restricted) as c:
             if isinstance(ctx,RequestContext):
                 await self._session(c,SessionPrincipal(user_id=ctx.user_id,session_id=ctx.session_id,expires_at=now()))
-            s=await self.load_relational_project(c,ctx.project_id,restricted=True,for_update=True)
+            s=await self.load_relational_project(c,ctx.project_id,restricted=restricted,for_update=True)
             require(s,"not_found")
             if isinstance(ctx,RequestContext):
                 m=s["members"].get(ctx.user_id);require(m,"not_found")
@@ -138,7 +138,7 @@ class EvidencePlatform:
             if fresh and isinstance(ctx,RequestContext):require(self.snapshot(s)==Snapshot(corpus_generation=ctx.corpus_generation,privacy_generation=ctx.privacy_generation),"evidence_changed")
             if write: require(not s["write_barrier"],"write_barrier")
             yield c,s
-            await self.sync_relational(c,ctx.project_id,s,restricted=True)
+            await self.sync_relational(c,ctx.project_id,s,restricted=restricted)
 
     def _cursor(self,binding,offset):
         raw=compact([binding,offset]);return base64.urlsafe_b64encode(raw.encode()).decode()+"."+self.keyed(raw)
@@ -216,7 +216,7 @@ class EvidencePlatform:
         try:text=upload.content.decode("utf-8")
         except UnicodeDecodeError:raise DomainError("unsupported_format") from None
         require(text.strip() and "\x00" not in text,"unsupported_format")
-        async with self.transaction(ctx,admin=True,write=True) as (_,s):
+        async with self.transaction(ctx,admin=True,write=True,restricted=True) as (_,s):
             doc_id=uid();title=normalize(upload.filename,s["people"]).text
             if normalize(upload.filename,s["people"]).ambiguous:title="Restricted upload"
             job=self._new_job(s,ctx.project_id,"ingest",docs=[doc_id])
@@ -313,12 +313,12 @@ class EvidencePlatform:
             s.setdefault("access_epochs",{})[user_id]=old["revision"]+1
             del s["members"][user_id]
     async def list_people(self,ctx,page):
-        async with self.transaction(ctx,admin=True) as (_,s):
+        async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
             items=[Person.model_validate(p) for p in s["people"].values()]
             return self._page(items,page,self._binding(ctx,s,"people"))
     async def associate_person(self,ctx,input):
         require(1<=len(input.display_name)<=255 and all(1<=len(c.value)<=500 for c in input.contacts),"invalid_input")
-        async with self.transaction(ctx,admin=True,write=True) as (_,s):
+        async with self.transaction(ctx,admin=True,write=True,restricted=True) as (_,s):
             if input.person_id:require(input.person_id in s["people"],"not_found")
             person_id=input.person_id or "PERSON_"+secrets.token_hex(8)
             for pid,p in s["people"].items():
@@ -340,7 +340,7 @@ class EvidencePlatform:
         return None
     async def mutate_document(self,ctx,document_id,action):
         require(action in ("activate","deactivate","delete"),"invalid_input")
-        async with self.transaction(ctx,admin=True) as (_,s):
+        async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
             kind="delete_document" if action=="delete" else action
             existing=self._active_lifecycle(s,kind,document_id)
             if existing:return existing
@@ -360,7 +360,7 @@ class EvidencePlatform:
             return job
 
     async def erase_person(self,ctx,person_id):
-        async with self.transaction(ctx,admin=True) as (_,s):
+        async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
             require(person_id in s["people"],"not_found")
             existing=self._active_lifecycle(s,"erase_person",person_id)
             if existing:return existing
@@ -395,24 +395,42 @@ class EvidencePlatform:
             self._recoverable_cleanup(view)
             return Job.model_validate(view["public"])
     async def list_privacy_diagnostics(self,ctx,page):
-        async with self.transaction(ctx,admin=True) as (_,s):
+        async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
             items=[PrivacyDiagnostic.model_validate(x) for x in s.get("privacy_diagnostics",{}).values()]
             return self._page(sorted(items,key=lambda x:(x.state,x.updated_at,x.id)),page,self._binding(ctx,s,"privacy-diagnostics"))
 
     async def resolve_privacy_diagnostic(self,ctx,diagnostic_id,resolution):
         require(1<=len(resolution)<=500,"invalid_input")
-        async with self.transaction(ctx,admin=True,write=True) as (_,s):
+        async with self.transaction(ctx,admin=True,write=True,restricted=True) as (_,s):
             raw=s.get("privacy_diagnostics",{}).get(diagnostic_id);require(raw,"not_found")
             require(raw["state"]=="open","invalid_input")
             record=s["records"].get(raw["record_id"]);require(record and record["record_version"]==raw["record_version"],"evidence_changed")
             allowed={"organization","role","system_code","contact","personal_identifier","private_cause"}
             if resolution.startswith("bind:"):
-                require(resolution[5:] in s["people"],"invalid_input")
+                require(resolution[5:] in s["people"] and raw["kind"] in ("person","uncertain"),"invalid_input")
             else:require(resolution in allowed,"invalid_input")
+            compatible={
+                "organization":{"person","organization","uncertain"},
+                "role":{"person","role","uncertain"},
+                "system_code":{"personal_identifier","uncertain"},
+                "contact":{"contact","uncertain"},
+                "personal_identifier":{"personal_identifier","uncertain"},
+                "private_cause":{"contextual_circumstance","uncertain"},
+            }
+            if not resolution.startswith("bind:"):require(raw["kind"] in compatible[resolution],"invalid_input")
+            require(type(raw.get("start")) is int and type(raw.get("end")) is int,"invalid_input")
+            if raw["span_id"].startswith("title:"):
+                source=s["documents"][record["original_doc_id"]]["raw_filename"]
+            else:
+                source=next((span["text"] for span in record["raw_spans"] if span["span_id"]==raw["span_id"]),None)
+            require(source is not None and 0<=raw["start"]<raw["end"]<=len(source),"evidence_changed")
+            expected_text=source[raw["start"]:raw["end"]]
             resolution_id=uid()
             s.setdefault("privacy_resolutions",{})[resolution_id]={
                 "id":resolution_id,"diagnostic_id":diagnostic_id,"admin_user_id":ctx.user_id,
                 "record_id":raw["record_id"],"record_version":raw["record_version"],
+                "source_hash":record["source_hash"],"span_id":raw["span_id"],"start":raw["start"],"end":raw["end"],
+                "expected_text":expected_text,"kind":raw["kind"],"reason":raw["reason"],
                 "decision":resolution,"created_at":iso(),
             }
             raw.update(state="resolved",resolution=resolution,updated_at=iso())
@@ -466,7 +484,7 @@ class EvidencePlatform:
         require(1<=len(text)<=8000,"invalid_input")
         return normalize(text,s["people"])
     async def begin_chat(self,ctx,input):
-        async with self.transaction(ctx,write=True,fresh=True) as (_,s):
+        async with self.transaction(ctx,write=True,fresh=True,restricted=True) as (_,s):
             self._conversation(s,ctx,input.conversation_id)
             key=compact([ctx.user_id,input.conversation_id,input.request_id]);digest=self.keyed(input.question)
             existing=s["attempts"].get(key)
@@ -635,7 +653,7 @@ class EvidencePlatform:
         return j
     @asynccontextmanager
     async def cap_transaction(self,cap):
-        async with self.db.connection() as c:
+        async with self.db.connection(restricted=True) as c:
             s=await self.load_relational_project(c,cap.project_id,restricted=True,for_update=True);require(s,"capability_denied")
             self._cap(s,cap);yield c,s
             await self.sync_relational(c,cap.project_id,s,restricted=True)
@@ -762,6 +780,6 @@ class Reader:
             binding=self.p._binding(ctx,s,"source",[r["record_id"],r["record_version"],ref.span_ids[0],before+after+len(ref.span_ids)])
             return self.p._source_page(s,ctx,r,ref.span_ids[0],before+after+len(ref.span_ids),self.p._cursor(binding,max(0,idx-before)))
     async def normalize_query(self,ctx,text):
-        async with self.p.transaction(ctx,fresh=True) as (_,s):return self.p._normalized(s,text)
+        async with self.p.transaction(ctx,fresh=True,restricted=True) as (_,s):return self.p._normalized(s,text)
     async def make_receipt(self,ctx,ref):
         async with self.p.transaction(ctx,fresh=True) as (_,s):return self.p._receipt(s,ctx.project_id,ref)

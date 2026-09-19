@@ -1,5 +1,42 @@
 # Compliance repair evidence - revision 3
 
+## Focused re-review repair after `305b549`
+
+Status remains **PARTIAL / BLOCKED**, not PASS. The frozen revision 3 semantics are unchanged.
+
+- R2/R3/R9, PRIV-01/03/05/09: protected `person`, `contact`, and `personal_identifier`
+  entities now require an exact source-bound edit, except an uncertain quarantined entity or the
+  explicit `system_code` non-edit classification. A final deterministic scan verifies edit mapping
+  and rejects surviving email, phone, or OP_ID values before `privacy_ready`.
+- R4/R8, PRIV-02/03/07/08: admin resolutions persist and revalidate diagnostic ID, record/version,
+  source hash, span ID, Unicode range, exact source text, kind, reason, decision, and administrator.
+  Bind and non-bind decisions have kind-specific contracts and must be applied by the retry model output.
+- R4/R6/R8, PRIV-06/07: ordinary PostgreSQL connections set only `<schema>,public`; restricted
+  privacy/admin/worker operations explicitly request `<schema>_restricted`. A separately provisioned
+  `RELEX_RESTRICTED_DATABASE_URL` is supported. The configured deployment still supplies only the owner
+  URL, so separate runtime-role enforcement remains BLOCKED pending safe credential provisioning.
+- R6: migration 004 adds typed scoped ownership/reference columns and FKs for conversations, messages,
+  attempts, answers, receipts, checkpoints, job-document/version links, and polymorphic dependency owners.
+  `record_dependencies` is populated from answers, memories, staged artifacts, receipts, and rebuild plans.
+  Two legacy job payloads reference already-deleted documents; their audit payloads remain preserved while
+  no typed live-reference row is created for the absent target.
+
+Focused evidence:
+
+1. `pytest -q backend/tests/evidence/test_compliance_repair.py backend/tests/product/test_transport.py`
+   reports 6 passed, including the contact-entity/zero-edits regression and the single correction bound.
+2. Restoring `manual_demo-quiescent.dump` into isolated `repair_r3_focus_305b`, then running migration 004
+   twice, yields versions `1,2,3,4`, 14 jobs, 12 valid job-document links, 12 valid job-version links,
+   and preserves the two stale historical document IDs only inside job audit JSON.
+3. Direct SQL probes reject both a cross-project dependency and a missing record version via foreign keys.
+4. A temporary ordinary role can read `manual_demo.projects` and receives `permission denied for schema
+   manual_demo_restricted`; the role is transaction-local and absent afterward.
+5. The isolated service probe persists an exact source-bound bind decision, retries the same job ID,
+   invokes the model with that resolution, sanitizes `Alice Example`, and reaches `privacy_ready`.
+6. An isolated ordinary-path service mutation persists typed conversation ownership and message linkage.
+
+Known provider and Chromium blockers below remain unchanged. No host-wide dependency or provider change was attempted.
+
 Status: IMPLEMENTED with partial LIVE-VERIFIED evidence; external-model and browser gates remain BLOCKED.
 Contract: `docs/implementation/compliance-repair-spec.md`, frozen revision 3.
 Baseline: `7034c7591b3b8f2e7dccdf3a10d283790121abdd`.

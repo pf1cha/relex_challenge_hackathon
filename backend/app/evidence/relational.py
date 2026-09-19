@@ -26,11 +26,11 @@ OBJECT_TABLES = {
     "chunks": "source_chunks",
     "entries": "index_entries",
     "history": "history_events",
-    "checkpoints": "artifact_checkpoints",
     "conversations": "conversations",
+    "answers": "answers",
     "messages": "messages",
     "attempts": "chat_attempts",
-    "answers": "answers",
+    "checkpoints": "artifact_checkpoints",
     "plans": "rebuild_plans",
     "capabilities": "job_capabilities",
 }
@@ -142,14 +142,89 @@ def _public_record(record):
 
 
 async def _sync_objects(conn, project_id, state):
+    # Clear dependent edges inside the transaction before pruning/reinserting
+    # authoritative object rows.
+    await conn.execute("DELETE FROM record_dependencies WHERE project_id=%s",(project_id,))
+    await conn.execute("DELETE FROM receipts WHERE project_id=%s",(project_id,))
+    await conn.execute("DELETE FROM chat_attempts WHERE project_id=%s",(project_id,))
+    await conn.execute("UPDATE messages SET answer_id=NULL WHERE project_id=%s",(project_id,))
     for state_key, table in OBJECT_TABLES.items():
         values = state.get(state_key, {})
         for object_key, payload in values.items():
-            await conn.execute(
-                f"INSERT INTO {table}(project_id,object_key,payload) VALUES(%s,%s,%s) "
-                "ON CONFLICT(project_id,object_key) DO UPDATE SET payload=excluded.payload",
-                (project_id, object_key, Jsonb(payload)))
+            if state_key=="conversations":
+                await conn.execute(
+                    "INSERT INTO conversations(project_id,object_key,payload,owner_user_id,created_at,updated_at) VALUES(%s,%s,%s,%s,%s,%s) "
+                    "ON CONFLICT(project_id,object_key) DO UPDATE SET payload=excluded.payload,owner_user_id=excluded.owner_user_id,updated_at=excluded.updated_at",
+                    (project_id,object_key,Jsonb(payload),payload["owner_user_id"],payload["created_at"],payload["updated_at"]))
+            elif state_key=="answers":
+                data=payload["data"]
+                await conn.execute(
+                    "INSERT INTO answers(project_id,object_key,payload,conversation_id,request_id,created_at,valid) VALUES(%s,%s,%s,%s,%s,%s,%s) "
+                    "ON CONFLICT(project_id,object_key) DO UPDATE SET payload=excluded.payload,valid=excluded.valid",
+                    (project_id,object_key,Jsonb(payload),data["conversation_id"],data["request_id"],data["created_at"],payload["valid"]))
+            elif state_key=="messages":
+                await conn.execute(
+                    "INSERT INTO messages(project_id,object_key,payload,conversation_id,role,state,answer_id,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s) "
+                    "ON CONFLICT(project_id,object_key) DO UPDATE SET payload=excluded.payload,state=excluded.state,answer_id=excluded.answer_id",
+                    (project_id,object_key,Jsonb(payload),payload["conversation_id"],payload["role"],payload["state"],payload.get("answer_id"),payload["created_at"]))
+            elif state_key=="attempts":
+                await conn.execute(
+                    "INSERT INTO chat_attempts(project_id,object_key,payload,conversation_id,message_id,owner_user_id,state) VALUES(%s,%s,%s,%s,%s,%s,%s) "
+                    "ON CONFLICT(project_id,object_key) DO UPDATE SET payload=excluded.payload,state=excluded.state",
+                    (project_id,object_key,Jsonb(payload),payload["attempt"]["conversation_id"],payload["message_id"],payload["owner"],payload["state"]))
+            elif state_key=="checkpoints":
+                await conn.execute(
+                    "INSERT INTO artifact_checkpoints(project_id,object_key,payload,job_id,artifact_key) VALUES(%s,%s,%s,%s,%s) "
+                    "ON CONFLICT(project_id,object_key) DO UPDATE SET payload=excluded.payload",
+                    (project_id,object_key,Jsonb(payload),payload["batch"]["job_id"],payload["artifact_key"]))
+            else:
+                await conn.execute(
+                    f"INSERT INTO {table}(project_id,object_key,payload) VALUES(%s,%s,%s) "
+                    "ON CONFLICT(project_id,object_key) DO UPDATE SET payload=excluded.payload",
+                    (project_id, object_key, Jsonb(payload)))
         await _prune(conn, table, project_id, set(values))
+
+
+async def _sync_references(conn, project_id, state):
+    jobs=state.get("jobs",{})
+    await conn.execute("DELETE FROM job_documents WHERE project_id=%s",(project_id,))
+    await conn.execute("DELETE FROM job_record_versions WHERE project_id=%s",(project_id,))
+    for job_id,job in jobs.items():
+        for document_id in job["work"].get("document_ids",[]):
+            if document_id in state.get("documents",{}):
+                await conn.execute("INSERT INTO job_documents(project_id,job_id,document_id) VALUES(%s,%s,%s)",
+                                   (project_id,job_id,document_id))
+        for ref in job["work"].get("record_versions",[]):
+            record=state.get("records",{}).get(ref["record_id"])
+            if record and record["record_version"]==ref["record_version"]:
+                await conn.execute("INSERT INTO job_record_versions(project_id,job_id,record_id,record_version) VALUES(%s,%s,%s,%s)",
+                                   (project_id,job_id,ref["record_id"],ref["record_version"]))
+    dependencies=[]
+    for owner_id,value in state.get("answers",{}).items():
+        dependencies.extend((owner_id,"answer",dep) for dep in value.get("dependencies",[]))
+    for owner_id,value in state.get("memories",{}).items():
+        dependencies.extend((owner_id,"memory",dep) for dep in value.get("data",{}).get("dependencies",[]))
+    for owner_id,value in state.get("checkpoints",{}).items():
+        dependencies.extend((owner_id,"artifact",dep) for dep in value.get("batch",{}).get("dependencies",[]))
+    for owner_id,value in state.get("plans",{}).items():
+        dependencies.extend((owner_id,"rebuild_plan",dep) for dep in value.get("dependencies",[]))
+    await conn.execute("DELETE FROM record_dependencies WHERE project_id=%s",(project_id,))
+    for owner_id,owner_kind,dep in dependencies:
+        owner_column={"answer":"answer_id","memory":"memory_id","artifact":"artifact_id",
+                      "rebuild_plan":"rebuild_plan_id"}[owner_kind]
+        await conn.execute(
+            f"INSERT INTO record_dependencies(project_id,owner_id,owner_kind,record_id,record_version,span_ids,{owner_column}) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+            (project_id,owner_id,owner_kind,dep["record_id"],dep["record_version"],Jsonb(dep["span_ids"]),owner_id))
+    await conn.execute("DELETE FROM receipts WHERE project_id=%s",(project_id,))
+    for answer_id,value in state.get("answers",{}).items():
+        for receipt in value.get("data",{}).get("receipts",[]):
+            ref=receipt["evidence_ref"]
+            await conn.execute(
+                "INSERT INTO receipts(project_id,receipt_id,answer_id,record_id,record_version,span_ids) VALUES(%s,%s,%s,%s,%s,%s)",
+                (project_id,receipt["id"],answer_id,ref["record_id"],ref["record_version"],Jsonb(ref["span_ids"])))
+            await conn.execute(
+                "INSERT INTO record_dependencies(project_id,owner_id,owner_kind,record_id,record_version,span_ids,receipt_id) VALUES(%s,%s,'receipt',%s,%s,%s,%s)",
+                (project_id,receipt["id"],ref["record_id"],ref["record_version"],Jsonb(ref["span_ids"]),receipt["id"]))
 
 
 async def sync_project(conn, project_id, state, *, restricted=False, scrub_legacy=True):
@@ -167,12 +242,18 @@ async def sync_project(conn, project_id, state, *, restricted=False, scrub_legac
     members = state.get("members", {})
     for user_id, member in members.items():
         await conn.execute(
+            "INSERT INTO project_principals(project_id,user_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
+            (project_id,user_id))
+        await conn.execute(
             "INSERT INTO project_memberships(project_id,user_id,role,access_revision,granted_at) VALUES(%s,%s,%s,%s,%s) "
             "ON CONFLICT(project_id,user_id) DO UPDATE SET role=excluded.role,access_revision=excluded.access_revision,granted_at=excluded.granted_at",
             (project_id, user_id, member["role"], member.get("revision", 0), member["granted_at"]))
     await _prune(conn, "project_memberships", project_id, set(members), "user_id")
     epochs = state.get("access_epochs", {})
     for user_id, revision in epochs.items():
+        await conn.execute(
+            "INSERT INTO project_principals(project_id,user_id) VALUES(%s,%s) ON CONFLICT DO NOTHING",
+            (project_id,user_id))
         await conn.execute(
             "INSERT INTO project_access_epochs(project_id,user_id,access_revision) VALUES(%s,%s,%s) "
             "ON CONFLICT(project_id,user_id) DO UPDATE SET access_revision=excluded.access_revision",
@@ -248,6 +329,8 @@ async def sync_project(conn, project_id, state, *, restricted=False, scrub_legac
             "lifecycle_revision=excluded.lifecycle_revision,lease_token=excluded.lease_token,expires_at=excluded.expires_at,payload=excluded.payload,updated_at=excluded.updated_at",
             (job_id, project_id, public["kind"], public["state"], public["stage"], job["lifecycle_revision"],
              job.get("lease_token"), job.get("expires_at"), Jsonb(job), public["created_at"], public["updated_at"]))
+    await conn.execute("DELETE FROM job_documents WHERE project_id=%s",(project_id,))
+    await conn.execute("DELETE FROM job_record_versions WHERE project_id=%s",(project_id,))
     await _prune(conn, "jobs", project_id, set(jobs), "id")
 
     operations = state.get("operations", {})
@@ -260,6 +343,7 @@ async def sync_project(conn, project_id, state, *, restricted=False, scrub_legac
              public["lifecycle_revision"], Jsonb(public["entry_ids"]), Jsonb(operation.get("outcome")), Jsonb(operation)))
     await _prune(conn, "index_operations", project_id, set(operations), "id")
     await _sync_objects(conn, project_id, state)
+    await _sync_references(conn, project_id, state)
 
     if restricted:
         people = state.get("people", {})

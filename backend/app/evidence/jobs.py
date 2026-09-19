@@ -8,7 +8,7 @@ from ..contracts.errors import DomainError
 from ..contracts.hashing import compact, artifact_key
 from .service import now,iso,uid,dump,require
 from .parsing import parse
-from .privacy import normalize, person_occurs
+from .privacy import normalize, person_occurs, validate_sanitized
 
 SEQUENCES={
 "ingest":["received","parsed","privacy_ready","extracted","indexed","published"],
@@ -73,7 +73,7 @@ class Jobs:
             for d in docs:d.update(latest_job_id=replacement.id,processing_state="pending",updated_at=iso())
 
     async def claim(self,worker_id,kinds):
-        async with self.p.db.connection() as c:
+        async with self.p.db.connection(restricted=True) as c:
             rows=await (await c.execute("SELECT ps.project_id AS id FROM project_state ps JOIN projects p ON p.id=ps.project_id ORDER BY p.created_at,p.id FOR UPDATE OF ps SKIP LOCKED")).fetchall()
             for row in rows:
                 s=await self.p.load_relational_project(c,row["id"],restricted=True)
@@ -92,7 +92,7 @@ class Jobs:
                 await self.p.sync_relational(c,row["id"],s,restricted=True)
         return None
     async def _mutate(self,lease,fn):
-        async with self.p.db.connection() as c:
+        async with self.p.db.connection(restricted=True) as c:
             s=await self.p.load_relational_project(c,lease.job.project_id,restricted=True,for_update=True);require(s,"lease_lost")
             j=self._check(s,lease);result=fn(s,j)
             await self.p.sync_relational(c,lease.job.project_id,s,restricted=True)
@@ -193,7 +193,7 @@ class Jobs:
             s["capabilities"]={key:cap for key,cap in s["capabilities"].items() if cap["job_id"]!=j["public"]["id"]}
             return Job.model_validate(j["public"])
         # Publication retry after a lost response is idempotent.
-        async with self.p.db.connection() as c:
+        async with self.p.db.connection(restricted=True) as c:
             state=await self.p.load_relational_project(c,lease.job.project_id,restricted=True)
             if state and state["jobs"].get(lease.job.id,{}).get("public",{}).get("state")=="completed":
                 return Job.model_validate(state["jobs"][lease.job.id]["public"])
@@ -207,7 +207,10 @@ class Jobs:
                     record=s["records"][ref["record_id"]]
                     title_span={"span_id":"title:"+record["record_id"],"text":s["documents"][record["original_doc_id"]]["raw_filename"]}
                     saved=s.get("privacy_plans",{}).get(f"{record['record_id']}:{record['record_version']}")
-                    resolutions=[value for value in s.get("privacy_resolutions",{}).values() if value["record_id"]==record["record_id"] and value["record_version"]==record["record_version"]]
+                    resolutions=[value for value in s.get("privacy_resolutions",{}).values()
+                                 if value["record_id"]==record["record_id"] and
+                                 value["record_version"]==record["record_version"] and
+                                 value.get("source_hash")==record["source_hash"]]
                     rows.append((record,[title_span,*record["raw_spans"]],saved,dict(s["people"]),resolutions,s["privacy_generation"]))
                 return rows
             private_records=await self._mutate(lease,read_private)
@@ -238,9 +241,8 @@ class Jobs:
                             aliases.setdefault(alias.casefold(),set()).add(pid)
                     approved_bindings=set()
                     for resolution in s.get("privacy_resolutions",{}).values():
-                        diagnostic=s.get("privacy_diagnostics",{}).get(resolution["diagnostic_id"])
-                        if diagnostic and resolution["decision"].startswith("bind:"):
-                            approved_bindings.add((diagnostic["span_id"],diagnostic.get("start"),diagnostic.get("end"),resolution["decision"][5:]))
+                        if resolution["decision"].startswith("bind:"):
+                            approved_bindings.add((resolution["span_id"],resolution["start"],resolution["end"],resolution["decision"][5:]))
                     for entity in plan["entities"]:
                         if entity["kind"]=="person":
                             value=entity["expected_text"].strip();hint=entity.get("identity_hint")
@@ -279,12 +281,17 @@ class Jobs:
                     for diagnostic_id,value in list(s.setdefault("privacy_diagnostics",{}).items()):
                         if value["record_id"]==plan["record_id"] and value["record_version"]==plan["record_version"] and value["state"]=="open":
                             s["privacy_diagnostics"].pop(diagnostic_id)
-                    uncertain=[entity for entity in plan["entities"] if entity["confidence"]=="uncertain" or entity["kind"]=="uncertain"]
-                    for index,reason in enumerate([*plan["unresolved_reasons"],*["uncertain entity"]*len(uncertain)]):
-                        entity=uncertain[index-len(plan["unresolved_reasons"])] if index>=len(plan["unresolved_reasons"]) else None
+                    actionable=[entity for entity in plan["entities"] if entity["confidence"]=="uncertain" or
+                                entity["kind"]=="uncertain" or plan["unresolved_reasons"] and
+                                entity["kind"] in ("person","contact","personal_identifier","contextual_circumstance")]
+                    seen=set()
+                    for entity in actionable:
+                        key=(entity["span_id"],entity["start"],entity["end"],entity["kind"])
+                        if key in seen:continue
+                        seen.add(key)
+                        reason="; ".join(plan["unresolved_reasons"])[:500] or "uncertain entity"
                         diagnostic=PrivacyDiagnostic(id=uid(),record_id=plan["record_id"],record_version=plan["record_version"],
-                            span_id=entity["span_id"] if entity else plan["covered_span_ids"][0],start=entity["start"] if entity else None,
-                            end=entity["end"] if entity else None,kind=entity["kind"] if entity else "uncertain",reason=reason,state="open",updated_at=now())
+                            span_id=entity["span_id"],start=entity["start"],end=entity["end"],kind=entity["kind"],reason=reason,state="open",updated_at=now())
                         s["privacy_diagnostics"][diagnostic.id]=dump(diagnostic)
                 return self._lease(j)
             lease=await self._mutate(lease,persist)
@@ -315,7 +322,13 @@ class Jobs:
                             text=text[:edit["start"]]+edit["replacement"]+text[edit["end"]:]
                         r["spans"][sp["ordinal"]]["text"]=text
                     title_id="title:"+r["record_id"];title=s["documents"][r["original_doc_id"]]["raw_filename"]
-                    for edit in reversed(sorted(edits.get(title_id,[]),key=lambda value:value["start"])):title=title[:edit["start"]]+edit["replacement"]+title[edit["end"]:]
+                    for edit in reversed(sorted(edits.get(title_id,[]),key=lambda value:value["start"])):
+                        require(title[edit["start"]:edit["end"]]==edit["expected_text"],"privacy_unresolved")
+                        title=title[:edit["start"]]+edit["replacement"]+title[edit["end"]:]
+                    sanitized={span["span_id"]:r["spans"][span["ordinal"]]["text"] for span in r["raw_spans"]}
+                    sanitized[title_id]=title
+                    try:validate_sanitized(plan,sanitized)
+                    except ValueError:raise DomainError("privacy_unresolved") from None
                     r["title"]=title;r["person_ids"]=sorted(ids);r["quarantined"]=bool(plan["unresolved_reasons"])
                     s["documents"][r["original_doc_id"]]["title"]=r["title"]
                 if any(s["records"][ref["record_id"]]["quarantined"] for ref in j["work"]["record_versions"]):
@@ -436,7 +449,7 @@ class Ledger:
             require(op["public"]["state"] in ("pending","failed") or op["public"]["action"]=="delete" and op["public"]["state"] in ("unknown","in_flight"),"index_outcome_unknown")
             op["public"]["state"]="in_flight";op["outcome"]=None
     async def report(self,ticket,outcome):
-        async with self.p.db.connection() as c:
+        async with self.p.db.connection(restricted=True) as c:
             s=await self.p.load_relational_project(c,ticket.operation.project_id,restricted=True,for_update=True);require(s,"capability_denied")
             op=s["operations"].get(ticket.operation.id)
             require(op and secrets.compare_digest(op["completion_token"],ticket.completion_token),"capability_denied")

@@ -50,6 +50,28 @@ class FailedProvider:
         raise RuntimeError("raw provider detail must not escape")
 
 
+class UneditedContactProvider:
+    settings = SimpleNamespace(model="privacy-test")
+
+    def __init__(self):
+        self.calls = 0
+
+    async def generate(self, role, system, payload, **kwargs):
+        self.calls += 1
+        span = payload["spans"][0]
+        value = "owner@example.test"
+        start = span["text"].index(value)
+        return {
+            "complete": True,
+            "covered_span_ids": [span["span_id"]],
+            "entities": [{"span_id": span["span_id"], "start": start, "end": start + len(value),
+                          "expected_text": value, "kind": "contact", "identity_hint": None,
+                          "evidence_span_ids": [span["span_id"]], "confidence": "certain"}],
+            "edits": [],
+            "unresolved_reasons": [],
+        }
+
+
 def test_corpus_parser_is_lossless_and_preserves_known_boundaries():
     root = Path(__file__).resolve().parents[3] / "corpus" / "acme"
     files = sorted(root.glob("*/*.txt"))
@@ -94,3 +116,14 @@ async def test_privacy_provider_failure_is_visible_and_safe():
         await PrivacyAgent(FailedProvider()).plan("project", "record", 1, [{"span_id": "s1", "text": text}],
             hashlib.sha256(text.encode()).hexdigest())
     assert failure.value.code == "provider_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_privacy_rejects_contact_entity_without_source_bound_edit():
+    text = "Contact owner@example.test for the handoff."
+    provider = UneditedContactProvider()
+    with pytest.raises(DomainError) as failure:
+        await PrivacyAgent(provider).plan("project", "record", 1, [{"span_id": "s1", "text": text}],
+            hashlib.sha256(text.encode()).hexdigest())
+    assert failure.value.code == "privacy_unresolved"
+    assert provider.calls == 2

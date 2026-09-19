@@ -121,12 +121,15 @@ class PrivacyAgent:
         return any(item.span_id==span_id and item.start<=start and item.end>=end and
                    (kinds is None or item.kind in kinds) for item in ranges)
 
-    def _validate_batch(self, result, spans):
+    def _validate_batch(self, result, spans, resolutions=()):
         by_id={span["span_id"]:span for span in spans}
         if result.get("complete") is not True or set(result.get("covered_span_ids",[])) != set(by_id):
             raise ValueError("incomplete_coverage")
         entities=[PrivacyEntity.model_validate(value) for value in result.get("entities",[])]
         edits=[PrivacyEdit.model_validate(value) for value in result.get("edits",[])]
+        reasons=result.get("unresolved_reasons",[])
+        if not isinstance(reasons,list) or any(not isinstance(value,str) or not value or len(value)>500 for value in reasons):
+            raise ValueError("invalid_unresolved_reason")
         occupied={}
         for item in [*entities,*edits]:
             span=by_id.get(item.span_id)
@@ -144,16 +147,71 @@ class PrivacyAgent:
             if not self._contains(entities,edit.span_id,edit.start,edit.end,expected):raise ValueError("unsupported_edit")
             if edit.reason=="private_cause" and self._temporal.search(edit.expected_text):raise ValueError("operational_time_removed")
             if edit.reason=="contextual_risk":raise ValueError("risk_must_not_rewrite")
+            if edit.replacement==edit.expected_text:raise ValueError("non_transforming_edit")
+        resolution_map={(value["span_id"],value["start"],value["end"],value["expected_text"]):value
+                        for value in resolutions}
+        edit_map={(value.span_id,value.start,value.end,value.expected_text):value for value in edits}
+        for entity in entities:
+            key=(entity.span_id,entity.start,entity.end,entity.expected_text)
+            resolution=resolution_map.get(key)
+            edit=edit_map.get(key)
+            if entity.kind in {"person","contact","personal_identifier"}:
+                permitted_non_edit=(entity.confidence=="uncertain" and bool(reasons) or
+                                    resolution and resolution["decision"]=="system_code" and
+                                    entity.kind=="personal_identifier")
+                expected_reason={"person":"identity","contact":"contact",
+                                 "personal_identifier":"personal_identifier"}[entity.kind]
+                if not permitted_non_edit and (edit is None or edit.reason!=expected_reason):
+                    raise ValueError("protected_entity_without_edit")
+        decision_contract={
+            "organization":("organization",None), "role":("role",None),
+            "system_code":("personal_identifier",None), "contact":("contact","contact"),
+            "personal_identifier":("personal_identifier","personal_identifier"),
+            "private_cause":("contextual_circumstance","private_cause"),
+        }
+        for key,resolution in resolution_map.items():
+            entity=next((value for value in entities if
+                         (value.span_id,value.start,value.end,value.expected_text)==key),None)
+            if entity is None:raise ValueError("resolution_not_applied")
+            decision=resolution["decision"]
+            if decision.startswith("bind:"):
+                if entity.kind!="person" or entity.identity_hint!=decision[5:] or edit_map.get(key) is None or edit_map[key].reason!="identity":
+                    raise ValueError("invalid_binding_resolution")
+            else:
+                expected_kind,expected_edit=decision_contract[decision]
+                if entity.kind!=expected_kind:raise ValueError("invalid_classification_resolution")
+                if expected_edit is None and edit_map.get(key) is not None:raise ValueError("non_edit_resolution_rewritten")
+                if expected_edit is not None and (edit_map.get(key) is None or edit_map[key].reason!=expected_edit):
+                    raise ValueError("resolved_entity_without_edit")
         for span in spans:
             text=span["text"]
             for pattern,kinds in ((EMAIL,{"contact"}),(PHONE,{"contact"}),(self._personal_id,{"personal_identifier"})):
                 for match in pattern.finditer(text):
                     if not self._contains(entities,span["span_id"],match.start(),match.end(),kinds):
                         raise ValueError("deterministic_candidate_missed")
-        reasons=result.get("unresolved_reasons",[])
-        if not isinstance(reasons,list) or any(not isinstance(value,str) or not value or len(value)>500 for value in reasons):
-            raise ValueError("invalid_unresolved_reason")
         return entities,edits,reasons
+
+    @staticmethod
+    def _validate_resolutions(record_id,record_version,source_hash,spans,resolutions,people):
+        by_id={span["span_id"]:span["text"] for span in spans}
+        allowed={"organization","role","system_code","contact","personal_identifier","private_cause"}
+        validated=[]
+        for value in resolutions or []:
+            decision=value.get("decision","")
+            if (value.get("record_id")!=record_id or value.get("record_version")!=record_version or
+                    value.get("source_hash")!=source_hash or value.get("span_id") not in by_id):
+                raise DomainError("privacy_unresolved")
+            start=value.get("start");end=value.get("end");expected=value.get("expected_text")
+            if (type(start) is not int or type(end) is not int or start<0 or end<=start or
+                    by_id[value["span_id"]][start:end]!=expected):
+                raise DomainError("privacy_unresolved")
+            if decision.startswith("bind:"):
+                if decision[5:] not in (people or {}):raise DomainError("privacy_unresolved")
+            elif decision not in allowed:raise DomainError("privacy_unresolved")
+            validated.append({key:value[key] for key in (
+                "diagnostic_id","record_id","record_version","source_hash","span_id","start","end",
+                "expected_text","kind","reason","decision")})
+        return validated
 
     async def _generate(self, payload, prior=None, error=None):
         system=(
@@ -180,24 +238,27 @@ class PrivacyAgent:
         source_spans=[span for span in spans if not span["span_id"].startswith("title:")]
         if hashlib.sha256("\n".join(span["text"] for span in source_spans).encode()).hexdigest()!=source_hash:
             raise DomainError("privacy_unresolved")
+        resolutions=self._validate_resolutions(record_id,record_version,source_hash,spans,resolutions,people)
         batches=self._batches(spans);all_entities=[];all_edits=[];all_reasons=[];covered=[];hashes=[];corrections=0
         known=[{"id":pid,"aliases":[person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]]}
                for pid,person in sorted((people or {}).items())]
         for index,batch in enumerate(batches):
+            batch_ids={span["span_id"] for span in batch}
+            batch_resolutions=[value for value in resolutions if value["span_id"] in batch_ids]
             payload={"record_id":record_id,"record_version":record_version,"source_hash":source_hash,
                      "batch_index":index,"batch_count":len(batches),"known_identities":known,
-                     "admin_resolutions":resolutions or [],
+                     "admin_resolutions":batch_resolutions,
                      "previous_context":spans[spans.index(batch[0])-1]["text"][-500:] if spans.index(batch[0]) else None,
                      "next_context":spans[spans.index(batch[-1])+1]["text"][:500] if spans.index(batch[-1])+1<len(spans) else None,
                      "spans":[{"span_id":span["span_id"],"text":span["text"]} for span in batch]}
             hashes.append(hashlib.sha256(json.dumps(payload["spans"],ensure_ascii=False,sort_keys=True).encode()).hexdigest())
             result=await self._generate(payload)
             try:
-                entities,edits,reasons=self._validate_batch(result,batch)
+                entities,edits,reasons=self._validate_batch(result,batch,batch_resolutions)
             except Exception as exc:
                 corrections+=1
                 result=await self._generate(payload,result,str(exc))
-                try:entities,edits,reasons=self._validate_batch(result,batch)
+                try:entities,edits,reasons=self._validate_batch(result,batch,batch_resolutions)
                 except Exception:raise DomainError("privacy_unresolved") from None
             all_entities.extend(entities);all_edits.extend(edits);all_reasons.extend(reasons)
             covered.extend(result["covered_span_ids"])
@@ -209,3 +270,22 @@ class PrivacyAgent:
             identity_revision=identity_revision,
             batch_hashes=hashes,corrections_used=corrections,entities=all_entities,edits=all_edits,
             covered_span_ids=covered,unresolved_reasons=sorted(set(all_reasons)),complete=len(covered)==len(spans))
+
+
+def validate_sanitized(plan, sanitized_by_id):
+    """Reject direct identifiers that survived the application-owned edit map."""
+    edits={(value["span_id"],value["start"],value["end"],value["expected_text"]):value
+           for value in plan["edits"]}
+    for entity in plan["entities"]:
+        if entity["kind"] not in ("person","contact","personal_identifier") or entity["confidence"]=="uncertain":
+            continue
+        key=(entity["span_id"],entity["start"],entity["end"],entity["expected_text"])
+        edit=edits.get(key)
+        if edit is None:raise ValueError("protected_entity_without_edit")
+        text=sanitized_by_id[entity["span_id"]]
+        start=edit.get("sanitized_start");end=edit.get("sanitized_end")
+        if type(start) is not int or type(end) is not int or text[start:end]!=edit["replacement"] or edit["replacement"]==edit["expected_text"]:
+            raise ValueError("sanitized_mapping_mismatch")
+    for text in sanitized_by_id.values():
+        if EMAIL.search(text) or PHONE.search(text) or PrivacyAgent._personal_id.search(text):
+            raise ValueError("direct_identifier_survived")
