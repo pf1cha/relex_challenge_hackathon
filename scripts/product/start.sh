@@ -97,6 +97,8 @@ host = os.environ['RELEX_HOST']
 if host not in ('127.0.0.1', 'localhost', '::1') and settings.http.allow_loopback_http:
     raise SystemExit('Non-loopback binding requires RELEX_LOOPBACK_HTTP=0 and HTTPS trusted origins')
 with socket.socket(socket.AF_INET6 if ':' in host else socket.AF_INET) as probe:
+    # Match Uvicorn so a just-stopped listener in TIME_WAIT does not block restart.
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         probe.bind((host, int(port_text)))
     except OSError as exc:

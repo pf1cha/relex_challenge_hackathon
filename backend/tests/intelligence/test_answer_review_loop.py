@@ -59,6 +59,100 @@ async def test_shallow_answer_is_prompted_to_search_sources_before_finalizing():
     assert len(owner.provider.requests) == 3
 
 
+class InvalidSequenceProvider:
+    settings = SimpleNamespace(model="test")
+
+    def __init__(self):
+        self.requests = []
+
+    async def generate(self, role, system, payload):
+        self.requests.append(payload)
+        if len(self.requests) == 1:
+            return {"tools": [{"name": "read_record", "arguments": {"record_id": "record-1"}}]}
+        if len(self.requests) == 2:
+            assert payload["retrieval_guidance"]["code"] == "invalid_tool_sequence"
+            assert payload["retrieval_guidance"]["requires_source_search"] is True
+            return {"tools": [{"name": "search_sources", "arguments": {
+                "query": "launch", "filters": {"record_id": "record-1"}}}]}
+        if len(self.requests) == 3:
+            assert payload["retrieval_guidance"]["code"] == "invalid_tool_sequence"
+            assert payload["retrieval_guidance"]["requires_source_search"] is False
+            return {"tools": [{"name": "search_sources", "arguments": {"query": "launch"}}]}
+        return {"claims": [], "cannot_establish": "no_evidence"}
+
+
+@pytest.mark.asyncio
+async def test_model_generated_invalid_tool_sequence_is_reprompted():
+    owner = DiscoveryOwner()
+    owner.provider = InvalidSequenceProvider()
+    ctx = SimpleNamespace(project_id="project-1", snapshot=Snapshot(corpus_generation=1, privacy_generation=0))
+    limits = SimpleNamespace(tool_calls_per_phase=10, source_tokens_per_phase=10000, pages_per_phase=10)
+    session = ToolSession(owner, ctx, limits, datetime.now(timezone.utc) + timedelta(seconds=10), 3)
+    await session.discover("launch")
+
+    result = await owner._agent("answer", session, {"question": "launch"})
+
+    assert result == {"claims": [], "cannot_establish": "no_evidence"}
+    assert [item["tool"] for item in session.trace] == ["search_memory", "search_sources"]
+    assert len(owner.provider.requests) == 4
+
+
+class UnreadEvidenceProvider:
+    settings = SimpleNamespace(model="test")
+
+    def __init__(self):
+        self.requests = []
+        self.final = {"claims": [{"text": "Supported claim", "evidence": [{
+            "record_id": "record-1", "record_version": 1, "span_ids": ["span-1"]}]}],
+            "cannot_establish": None}
+
+    async def generate(self, role, system, payload):
+        self.requests.append(payload)
+        if len(self.requests) == 1:
+            return self.final
+        if len(self.requests) == 2:
+            assert payload["retrieval_guidance"]["code"] == "unread_evidence"
+            assert payload["retrieval_guidance"]["suggested_record_ids"] == ["record-1"]
+            return {"tools": [{"name": "read_record", "arguments": {"record_id": "record-1"}}]}
+        return self.final
+
+
+class CitationSession:
+    def __init__(self):
+        self.results = []
+        self.discovered_records = {"record-0", "record-1"}
+        self.source_records = {"record-0", "record-1"}
+        self.source_searches = 1
+        self.searches = 1
+        self.round_limit = 3
+        self.spans = {("record-0", 1): {"span-0": SimpleNamespace(ordinal=1)}}
+        self.calls = []
+
+    def coverage(self):
+        return Coverage(state="insufficient", records=[], limitations=[])
+
+    def retrieval_state(self):
+        return {}
+
+    async def call(self, name, arguments):
+        self.calls.append((name, arguments))
+        self.spans[("record-1", 1)] = {"span-1": SimpleNamespace(ordinal=1)}
+
+
+@pytest.mark.asyncio
+async def test_final_answer_with_unread_evidence_is_reprompted_to_read_record():
+    owner = Answers()
+    owner.provider = UnreadEvidenceProvider()
+    session = CitationSession()
+    session.deadline = datetime.now(timezone.utc) + timedelta(seconds=10)
+
+    result = await owner._agent("answer", session, {"question": "launch"})
+
+    assert result == owner.provider.final
+    assert session.calls == [("read_record", {"record_id": "record-1"})]
+    assert len(owner.provider.requests) == 3
+
+
 class TwoRepairAnswers(Answers):
     def __init__(self):
         self.limits = RuntimeLimits(answer_search_rounds=3, repair_search_rounds=1,
