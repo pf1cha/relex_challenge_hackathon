@@ -1,6 +1,9 @@
+<<<<<<< HEAD
 corpus/
 .codex/
 
+=======
+>>>>>>> origin/main
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -219,7 +222,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+<<<<<<< HEAD
 
 # Project-owned runtime services and CPU environment
 .runtime/
 .venv-cpu/
+=======
+>>>>>>> origin/main
