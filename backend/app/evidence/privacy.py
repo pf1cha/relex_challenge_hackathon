@@ -95,8 +95,8 @@ def person_occurs(record, person_id, people):
 
 class PrivacyAgent:
     """Mandatory bounded semantic classification with deterministic validation."""
-    policy_version = "privacy-r7-initial-variants-role-guard"
-    prompt_version = "privacy-plan-v10-initial-context"
+    policy_version = "privacy-r9-semantic-identity-role"
+    prompt_version = "privacy-plan-v13-no-identifier-escape"
     max_batch_codepoints = 800
     response_schema = {
         "name": "privacy_plan_batch", "strict": True,
@@ -107,7 +107,7 @@ class PrivacyAgent:
                     "type": "object",
                     "properties": {
                         "span_id": {"type": "string"},
-                        "kind": {"type": "string", "enum": ["person", "contact", "personal_identifier"]},
+                        "kind": {"type": "string", "enum": ["person", "contact", "role", "organization"]},
                         "expected_text": {"type": "string"},
                         "identity_hint": {"type": ["string", "null"]},
                     },
@@ -201,9 +201,8 @@ class PrivacyAgent:
         """Reject semantic labels whose source text cannot have the claimed PII shape."""
         blocked_name_parts={
             "account", "category", "customer", "data", "delivery", "director", "executive",
-            "architect", "ceo", "cfo", "consultant", "controller", "coo", "cto", "gmbh",
-            "lead", "manager", "officer", "org", "president", "project", "protection", "relex",
-            "report", "solution", "subject", "team", "technical", "vp",
+            "gmbh", "lead", "manager", "officer", "org", "project", "protection", "relex",
+            "report", "solution", "subject", "team", "technical",
         }
 
         def looks_like_person(value):
@@ -341,6 +340,17 @@ class PrivacyAgent:
         return edits
 
     def _validate_batch(self, result, spans, resolutions=(), people=None):
+        variant_owners={}
+        for person_id,person in (people or {}).items():
+            for variant in self._identity_variants(person):
+                variant_owners.setdefault(variant.casefold(),set()).add(person_id)
+        for entity in result.get("entities",[]):
+            hint=entity.get("identity_hint")
+            if entity.get("kind")!="person" and hint is not None:
+                raise ValueError("non_person_identity_hint")
+            owners=variant_owners.get(str(entity.get("expected_text","")).casefold(),set())
+            if len(owners)==1 and (entity.get("kind")!="person" or hint!=next(iter(owners))):
+                raise ValueError("known_name_variant_misclassified")
         result=self._resolve_entity_offsets(result,spans)
         for entity in result.get("entities",[]):
             hint=entity.get("identity_hint")
@@ -440,12 +450,16 @@ class PrivacyAgent:
         system=(
             "Find personal information in every supplied span. Return one JSON object containing only entities. "
             "For each entity return span_id, expected_text copied verbatim from that span, kind, and identity_hint. "
-            "Kinds are person, contact, and personal_identifier. Contact includes email, phone, and postal address. "
+            "Kinds are person, contact, role, and organization. Exact personal identifiers are handled separately "
+            "by the application and are not a semantic kind. Contact includes postal addresses. Classify job titles, responsibilities, offices, departments, honorifics, and "
+            "organization-plus-title labels as role or organization, never person. Return those non-person labels "
+            "so the application can verify that the distinction was made. "
             "For a person, compare spelling variants, shortened names, initials, and transcription variants against "
-            "the aliases and derived name_variants in known_identities. Initials such as LF can match Lena Fischer; "
-            "role abbreviations such as CFO are not people. Set identity_hint to that supplied ID only when the "
-            "reference is unambiguous and context supports it; otherwise null. "
-            "For non-person entities identity_hint must be null. "
+            "the aliases and derived name_variants in known_identities. If source text exactly matches a name_variant "
+            "belonging to exactly one identity, classify it as person and use that identity ID. For other person "
+            "variants, set identity_hint to a supplied ID only when the "
+            "reference is unambiguous and context supports it; otherwise null. For every non-person kind, "
+            "identity_hint must be null. "
             "When PII is ambiguous, use personal_identifier. Do not emit organizations, roles, dates, business status, "
             "private circumstances, warnings, or ordinary prose. Never invent source text. The application owns offsets, "
             "coverage, identity binding, confidence, and edits."

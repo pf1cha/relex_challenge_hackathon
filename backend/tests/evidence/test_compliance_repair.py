@@ -24,7 +24,7 @@ class CorrectingProvider:
         assert schema["strict"] is True
         assert set(entity["required"]) == {"span_id", "kind", "expected_text", "identity_hint"}
         assert entity["properties"]["kind"]["enum"] == [
-            "person", "contact", "personal_identifier"]
+            "person", "contact", "role", "organization"]
         span = payload["spans"][0]
         name = "Åsa Öberg"
         return {
@@ -84,7 +84,7 @@ class InitialAndRoleProvider:
         return {"entities": [
             {"span_id": "s1", "kind": "person", "expected_text": "LF",
              "identity_hint": "PERSON_lena"},
-            {"span_id": "s2", "kind": "person", "expected_text": "Acme CFO",
+            {"span_id": "s2", "kind": "role", "expected_text": "Acme CFO",
              "identity_hint": None},
         ]}
 

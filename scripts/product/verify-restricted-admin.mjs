@@ -40,10 +40,10 @@ try{
 
  const firstGroup=groups.first();await firstGroup.locator('summary').click();
  const firstDocument=firstGroup.locator('.original-document-card').first();
- await firstDocument.getByRole('button',{name:'View original',exact:true}).click();
+ await firstDocument.getByRole('button',{name:'View document',exact:true}).click();
  const content=firstDocument.locator('.original-document-content');await content.waitFor();
  if(!(await content.textContent()).trim())throw Error('Original document content was empty');
- checks.push('Administrator can open original source content on demand');
+ checks.push('Administrator can open sanitized document content on demand');
 
  const mappingGroups=admin.locator('.identity-mappings-panel .identity-kind-group');await mappingGroups.first().waitFor();
  for(let index=0;index<await mappingGroups.count();index++)if(await mappingGroups.nth(index).getAttribute('open')!==null)throw Error('Identifier mapping group was not folded');
