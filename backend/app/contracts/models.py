@@ -439,11 +439,28 @@ class HistoryEvent(DTO):
     evidence: list[EvidenceRef]
     prior_event_ids: list[Id]
     review_state: Literal['pending', 'passed', 'failed']
+    human_review_state: Literal['not_required', 'pending', 'approved', 'rejected'] = 'not_required'
+    automated_reason: str | None = None
+    human_reviewed_by: Id | None = None
+    human_reviewed_at: Instant | None = None
 
 class HistoryPage(DTO):
     items: list[HistoryEvent]
     next_cursor: str | None
     coverage: Coverage
+
+class StaleReview(DTO):
+    id: Id
+    kind: Literal['replacement', 'cancellation', 'correction', 'reinstatement']
+    scope: str
+    proposed_change: str
+    reason: str
+    state: Literal['pending', 'approved', 'rejected']
+    stale_evidence: list[Receipt]
+    marking_evidence: list[Receipt]
+    created_at: Instant
+    reviewed_by: Id | None
+    reviewed_at: Instant | None
 
 class SearchHit(DTO):
     record: RecordSummary

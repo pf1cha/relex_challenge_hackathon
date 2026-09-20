@@ -9,7 +9,75 @@ from app.contracts.models import (
     ReviewResult, ReviewedPayload, RuntimeLimits, SearchPage, Snapshot,
 )
 from app.intelligence.answering import Answers
+from app.intelligence.maintenance import Maintenance
 from app.intelligence.tools import ToolSession
+from app.contracts.errors import DomainError
+
+
+def test_stale_status_requires_retrieved_human_approved_history():
+    answers=Answers()
+    refs=[{"record_id":"record-1","record_version":1,"span_ids":["span-1"]}]
+    session=SimpleNamespace(approved_history_events=[])
+    with pytest.raises(DomainError) as error:
+        answers._require_human_review("superseded",refs,session)
+    assert error.value.code=="contract_violation"
+    evidence=SimpleNamespace(record_id="record-1",record_version=1)
+    session.approved_history_events.append(SimpleNamespace(kind="replacement",evidence=[evidence]))
+    answers._require_human_review("superseded",refs,session)
+    with pytest.raises(DomainError):
+        answers._require_human_review("corrected",refs,session)
+
+
+@pytest.mark.asyncio
+async def test_ingestion_history_skips_stale_relationship_until_post_ingestion_analysis():
+    maintenance=Maintenance()
+    maintenance.retrieval=SimpleNamespace()
+    cap=SimpleNamespace(project_id="project-1")
+    record=SimpleNamespace(spans=[SimpleNamespace(span_id="span-1")])
+    value={"events":[{"kind":"replacement","topic":"launch","scope":"date","text":"November replaces October",
+        "span_ids":["span-1"],"effective_time":{"value":"2026-09-10","precision":"day","timezone":None},
+        "prior_event_ids":[]}]}
+    events=await maintenance._history(cap,record,value,datetime.now(timezone.utc),allow_consequential=False)
+    assert events==[]
+
+
+class NoActionProvider:
+    settings=SimpleNamespace(model="test")
+    def __init__(self,reasonable):self.reasonable=reasonable;self.calls=[]
+    async def generate(self,role,system,payload):
+        self.calls.append((role,payload))
+        if role=="stale_no_action_review":return {"reasonable":self.reasonable,"reasoning":"No explicit current action." if self.reasonable else "An explicit cancellation requires investigation."}
+        if len([item for item in self.calls if item[0]=="stale_analysis"])==1:return {"proposals":[]}
+        return {"proposals":[{"record_id":"record-1","prior_event_id":"prior-1","kind":"cancellation","text":"Cancelled","span_ids":["span-1"],"effective_time":{"value":None,"precision":"unknown","timezone":None}}]}
+
+
+class NoActionSession:
+    def __init__(self):self.results=[];self.deadline=datetime.now(timezone.utc)+timedelta(seconds=10)
+    def coverage(self):return Coverage(state="insufficient",records=[],limitations=[])
+    def retrieval_state(self):return {}
+
+
+@pytest.mark.asyncio
+async def test_reasonable_no_stale_action_is_accepted_after_lightweight_review():
+    maintenance=Maintenance();maintenance.provider=NoActionProvider(True);maintenance._generate=Answers._generate.__get__(maintenance)
+    memory=SimpleNamespace(model_dump=lambda mode="json":{"text":"Current unless later replaced."})
+
+    result=await maintenance._stale_agent(NoActionSession(),[memory],{"record-1"},[])
+
+    assert result=={"proposals":[]}
+    assert [role for role,_ in maintenance.provider.calls]==["stale_analysis","stale_no_action_review"]
+
+
+@pytest.mark.asyncio
+async def test_unreasonable_no_stale_action_gets_one_bounded_retry():
+    maintenance=Maintenance();maintenance.provider=NoActionProvider(False);maintenance._generate=Answers._generate.__get__(maintenance)
+    memory=SimpleNamespace(model_dump=lambda mode="json":{"text":"The budget is explicitly cancelled."})
+
+    prior=SimpleNamespace(id="prior-1",model_dump=lambda mode="json":{"id":"prior-1"})
+    result=await maintenance._stale_agent(NoActionSession(),[memory],{"record-1"},[prior])
+
+    assert result["proposals"][0]["kind"]=="cancellation"
+    assert maintenance.provider.calls[-1][1]["retrieval_guidance"]["code"]=="unreasonable_no_action"
 
 
 class ShallowProvider:
@@ -17,6 +85,7 @@ class ShallowProvider:
 
     def __init__(self):
         self.requests = []
+
 
     async def generate(self, role, system, payload):
         self.requests.append(payload)

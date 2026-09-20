@@ -1,13 +1,35 @@
 """Restricted identity resolution; never guesses between same-name people."""
-import re, hashlib, json
+import re, hashlib, json, logging, unicodedata
+import httpx
 from ..contracts.errors import DomainError
 from ..contracts.models import PrivacyPlan, PrivacyEntity, PrivacyEdit
 from ..contracts.models import NormalizedText
+
+logger = logging.getLogger(__name__)
 EMAIL = re.compile(r"(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 PHONE = re.compile(r"(?<!\w)\+\d[\d ()-]{7,}\d")
 NAME = re.compile(r"\b[A-Z][a-z]+(?:[-'][A-Z]?[a-z]+)?(?: [A-Z][a-z]+){1,3}\b")
 PRIVATE = re.compile(r"\b(?:for|because of|due to) (?:surgery|divorce|medical treatment|a medical condition)\b", re.I)
 ADDRESS = re.compile(r"\b\d{1,5}\s+[A-Z][\w ]{1,45}\s(?:Street|Road|Avenue|Lane|Drive)\b",re.I)
+
+
+class GlinerDetectorClient:
+    """Strict client for the required local token-classification service."""
+    def __init__(self,url,timeout_seconds=120):
+        self.url=url.rstrip("/")
+        self.client=httpx.AsyncClient(timeout=timeout_seconds)
+
+    async def detect(self,spans):
+        try:
+            response=await self.client.post(self.url+"/detect",json={"spans":spans})
+            response.raise_for_status();values=response.json()
+            if not isinstance(values,list):raise ValueError()
+            return values
+        except (httpx.HTTPError,ValueError,TypeError):
+            raise DomainError("pii_detector_unavailable") from None
+
+    async def close(self):
+        await self.client.aclose()
 
 def aliases(person):
     return [person["display_name"], *[x["value"] for x in person["contacts"]]]
@@ -95,9 +117,9 @@ def person_occurs(record, person_id, people):
 
 class PrivacyAgent:
     """Mandatory bounded semantic classification with deterministic validation."""
-    policy_version = "privacy-r9-semantic-identity-role"
-    prompt_version = "privacy-plan-v13-no-identifier-escape"
-    max_batch_codepoints = 800
+    policy_version = "privacy-r10-detect-then-map"
+    prompt_version = "privacy-plan-v16-candidate-identity-mapping"
+    max_batch_codepoints = 2400
     response_schema = {
         "name": "privacy_plan_batch", "strict": True,
         "schema": {
@@ -107,7 +129,7 @@ class PrivacyAgent:
                     "type": "object",
                     "properties": {
                         "span_id": {"type": "string"},
-                        "kind": {"type": "string", "enum": ["person", "contact", "role", "organization"]},
+                        "kind": {"type": "string", "enum": ["person", "contact", "role", "organization", "other"]},
                         "expected_text": {"type": "string"},
                         "identity_hint": {"type": ["string", "null"]},
                     },
@@ -119,17 +141,61 @@ class PrivacyAgent:
             "additionalProperties": False,
         },
     }
+    detector_schema = {
+        "name": "privacy_candidate_batch", "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "candidates": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {
+                        "span_id": {"type": "string"},
+                        "expected_text": {"type": "string"},
+                    },
+                    "required": ["span_id", "expected_text"],
+                    "additionalProperties": False,
+                }},
+            },
+            "required": ["candidates"],
+            "additionalProperties": False,
+        },
+    }
+    mapper_schema = {
+        "name": "privacy_candidate_mapping", "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "decisions": {"type": "array", "items": {
+                    "type": "object",
+                    "properties": {
+                        "candidate_id": {"type": "string"},
+                        "kind": {"type": "string", "enum": ["person", "contact", "role", "organization", "other"]},
+                        "identity_hint": {"type": ["string", "null"]},
+                    },
+                    "required": ["candidate_id", "kind", "identity_hint"],
+                    "additionalProperties": False,
+                }},
+            },
+            "required": ["decisions"],
+            "additionalProperties": False,
+        },
+    }
     _personal_id = re.compile(r"(?<!\w)OP_ID\s*:?\s*[A-Za-z0-9-]+(?!\w)", re.I)
     _temporal = re.compile(r"\b(?:january|february|march|april|may|june|july|august|september|october|november|december|today|tomorrow|until|through|by)\b|\b\d{4}-\d{2}(?:-\d{2})?\b", re.I)
 
-    def __init__(self, provider):
+    def __init__(self, provider, detector_provider=None):
         self.provider = provider
+        self.detector_provider = detector_provider
+
+    async def close(self):
+        if self.detector_provider is not None and hasattr(self.detector_provider,"close"):
+            await self.detector_provider.close()
 
     @staticmethod
     def _identity_variants(person):
         """Expose conservative name forms for semantic identity comparison."""
         display=(person.get("display_name") or "").strip()
-        variants=[display, *[contact.get("value") for contact in person.get("contacts",[])]]
+        variants=[display]
         parts=display.split()
         if len(parts)>=2 and all(part for part in parts):
             initials="".join(part[0].upper() for part in parts)
@@ -177,6 +243,15 @@ class PrivacyAgent:
         resolved=[]
         for item in result.get("entities",[]):
             text=by_id.get(item.get("span_id"));expected=item.get("expected_text")
+            if (item.pop("source_bound",False) and isinstance(text,str) and
+                    type(item.get("start")) is int and type(item.get("end")) is int and
+                    text[item["start"]:item["end"]]==expected):
+                item["evidence_span_ids"]=[item["span_id"]]
+                if item.get("kind")=="person" and (not item.get("identity_hint") or
+                        item.get("identity_hint","").startswith("NEW_")):
+                    item["identity_hint"]="NEW_"+hashlib.sha256(expected.casefold().encode()).hexdigest()[:12]
+                elif item.get("kind") not in ("person","contact"):item["identity_hint"]=None
+                item["confidence"]="certain";resolved.append(item);continue
             matches=[match.start() for match in re.finditer(re.escape(expected),text)] if isinstance(text,str) and isinstance(expected,str) and expected else []
             if len(matches)!=1:
                 candidates=[(span_id,value) for span_id,value in by_id.items() if isinstance(expected,str) and expected and value.count(expected)==1]
@@ -187,9 +262,10 @@ class PrivacyAgent:
             item.pop("start",None);item.pop("end",None)
             item["start"]=matches[0];item["end"]=matches[0]+len(expected)
             item["evidence_span_ids"]=[item["span_id"]]
-            if item.get("kind")=="person" and not item.get("identity_hint"):
+            if item.get("kind")=="person" and (not item.get("identity_hint") or
+                    item.get("identity_hint","").startswith("NEW_")):
                 item["identity_hint"]="NEW_"+hashlib.sha256(expected.casefold().encode()).hexdigest()[:12]
-            elif item.get("kind")!="person":
+            elif item.get("kind") not in ("person","contact"):
                 item["identity_hint"]=None
             item["confidence"]="certain"
             resolved.append(item)
@@ -204,10 +280,15 @@ class PrivacyAgent:
             "gmbh", "lead", "manager", "officer", "org", "project", "protection", "relex",
             "report", "solution", "subject", "team", "technical",
         }
+        blocked_person_values={
+            "he", "her", "hers", "him", "i", "me", "my", "she", "them", "they",
+            "us", "we", "you", "your",
+        }
 
         def looks_like_person(value):
             parts=value.split()
-            if not 1<=len(parts)<=4 or any(part.casefold() in blocked_name_parts for part in parts):
+            if (value.casefold() in blocked_person_values or not 1<=len(parts)<=4 or
+                    any(part.casefold() in blocked_name_parts for part in parts)):
                 return False
             return all((re.fullmatch(r"[A-Z]\.",part) is not None) or
                        (part[0].isupper() and all(char.isalpha() or char in "-'" for char in part))
@@ -239,7 +320,7 @@ class PrivacyAgent:
         by_id={span["span_id"]:span["text"] for span in spans}
         candidates=[]
         for span_id,text in by_id.items():
-            for pattern,kind in ((EMAIL,"personal_identifier"),(PHONE,"contact"),(cls._personal_id,"personal_identifier")):
+            for pattern,kind in ((EMAIL,"contact"),(PHONE,"contact"),(cls._personal_id,"personal_identifier")):
                 for match in pattern.finditer(text):
                     candidates.append((span_id,match.start(),match.end(),match.group(),kind))
         entities=result.setdefault("entities",[])
@@ -258,18 +339,39 @@ class PrivacyAgent:
 
     @staticmethod
     def _enforce_known_people(result, spans, people):
+        """Fill exact, unambiguous occurrences of model-established identities."""
         entities=result.setdefault("entities",[])
+        owners={}
         for person_id,person in (people or {}).items():
             if person.get("state")=="erased":
                 continue
-            for alias in [person.get("display_name"), *[value.get("value") for value in person.get("contacts",[])]]:
-                if not alias:
-                    continue
-                pattern=re.compile(r"(?<!\w)"+re.escape(alias)+r"(?!\w)",re.I)
+            for alias in [person.get("display_name")]:
+                if alias:
+                    owners.setdefault(alias.casefold(),set()).add(person_id)
+        for alias_key,person_ids in owners.items():
+            if len(person_ids)!=1:
+                continue
+            person_id=next(iter(person_ids))
+            pattern=re.compile(r"(?<!\w)"+re.escape(alias_key)+r"(?!\w)",re.I)
+            for span in spans:
+                for match in pattern.finditer(span["text"]):
+                    entities.append({"span_id":span["span_id"],"start":match.start(),"end":match.end(),
+                        "kind":"person","identity_hint":person_id,"evidence_span_ids":[span["span_id"]],
+                        "expected_text":match.group(),"confidence":"certain"})
+        return result
+
+    @staticmethod
+    def _enforce_known_contacts(result, spans, people):
+        entities=result.setdefault("entities",[])
+        for person_id,person in (people or {}).items():
+            for contact in person.get("contacts",[]):
+                value=contact.get("value")
+                if not value:continue
+                pattern=re.compile(r"(?<!\w)"+re.escape(value)+r"(?!\w)",re.I)
                 for span in spans:
                     for match in pattern.finditer(span["text"]):
                         entities.append({"span_id":span["span_id"],"start":match.start(),"end":match.end(),
-                            "kind":"person","identity_hint":person_id,"evidence_span_ids":[span["span_id"]],
+                            "kind":"contact","identity_hint":person_id,"evidence_span_ids":[span["span_id"]],
                             "expected_text":match.group(),"confidence":"certain"})
         return result
 
@@ -286,9 +388,33 @@ class PrivacyAgent:
         for entity in result.get("entities",[]):
             key=(entity.get("span_id"),entity.get("start"),entity.get("end"),entity.get("expected_text"))
             prior=unique.get(key)
-            if prior is None or (prior.get("confidence")!="certain" and entity.get("confidence")=="certain"):
+            stronger_confidence=(prior is not None and prior.get("confidence")!="certain" and
+                                entity.get("confidence")=="certain")
+            stronger_identity=(prior is not None and not prior.get("identity_hint") and
+                               bool(entity.get("identity_hint")))
+            if prior is None or stronger_confidence or stronger_identity:
                 unique[key]=entity
         result["entities"]=list(unique.values())
+        return result
+
+    @staticmethod
+    def _collapse_nested_identity_entities(result):
+        ordered=sorted(result.get("entities",[]),key=lambda value:(
+            value.get("span_id"),value.get("start",0),-(value.get("end",0)-value.get("start",0))))
+        kept=[]
+        for entity in ordered:
+            containing=next((prior for prior in kept if prior.get("span_id")==entity.get("span_id") and
+                prior.get("start",0)<=entity.get("start",0) and prior.get("end",0)>=entity.get("end",0)),None)
+            if containing:
+                # A detector may emit the local-part inside an email as a person,
+                # or a first name inside a full name as another person. Only the
+                # maximal source range can be transformed without overlapping edits.
+                if containing.get("kind") in {"contact", "personal_identifier"}:
+                    continue
+                if containing.get("kind")==entity.get("kind")=="person":
+                    continue
+            kept.append(entity)
+        result["entities"]=kept
         return result
 
     @staticmethod
@@ -299,7 +425,7 @@ class PrivacyAgent:
             if person.get("state")=="erased":
                 continue
             display_name=person.get("display_name")
-            for alias in [display_name, *[contact.get("value") for contact in person.get("contacts",[])]]:
+            for alias in [display_name, *PrivacyAgent._identity_variants(person), *[contact.get("value") for contact in person.get("contacts",[])]]:
                 if alias:
                     aliases.setdefault(alias.casefold(),set()).add(person_id)
             if display_name and len(display_name.split())>1:
@@ -346,21 +472,47 @@ class PrivacyAgent:
                 variant_owners.setdefault(variant.casefold(),set()).add(person_id)
         for entity in result.get("entities",[]):
             hint=entity.get("identity_hint")
-            if entity.get("kind")!="person" and hint is not None:
-                raise ValueError("non_person_identity_hint")
-            owners=variant_owners.get(str(entity.get("expected_text","")).casefold(),set())
-            if len(owners)==1 and (entity.get("kind")!="person" or hint!=next(iter(owners))):
-                raise ValueError("known_name_variant_misclassified")
+            value=str(entity.get("expected_text",""))
+            owners=variant_owners.get(value.casefold(),set())
+            if len(owners)==1:
+                entity["kind"]="person";entity["identity_hint"]=next(iter(owners));hint=entity["identity_hint"]
+            if entity.get("kind") not in ("person","contact"):
+                entity["identity_hint"]=None
         result=self._resolve_entity_offsets(result,spans)
         for entity in result.get("entities",[]):
             hint=entity.get("identity_hint")
+            if entity.get("kind")=="contact" and hint in (people or {}):
+                value=entity.get("expected_text","")
+                if EMAIL.fullmatch(value):
+                    local=value.split("@",1)[0]
+                    pieces={part for part in re.split(r"[^a-z]+",unicodedata.normalize(
+                        "NFKD",local).encode("ascii","ignore").decode().casefold()) if part}
+                    names=[part for part in re.split(r"[^a-z]+",unicodedata.normalize(
+                        "NFKD",people[hint].get("display_name","")).encode(
+                            "ascii","ignore").decode().casefold()) if part]
+                    supported=bool(names and names[-1] in pieces and (
+                        len(names)==1 or names[0] in pieces or names[0][:1] in pieces))
+                    if not supported:entity["identity_hint"]=None
+                else:
+                    entity["identity_hint"]=None
+                hint=entity.get("identity_hint")
+            if entity.get("kind")=="contact" and hint not in (people or {}):
+                entity["identity_hint"]=None
+                continue
             if hint and hint not in (people or {}) and not hint.startswith("NEW_"):
-                raise ValueError("unknown_identity_hint")
+                # A concurrent record can return a stale PERSON id. Preserve
+                # the model's person classification and resolve against the
+                # current registry below instead of accepting an unknown ID.
+                entity["identity_hint"]=("NEW_"+hashlib.sha256(
+                    entity.get("expected_text","").casefold().encode()).hexdigest()[:12]
+                    if entity.get("kind")=="person" else None)
         result=self._filter_model_entities(result)
         result=self._enforce_deterministic_entities(result,spans)
         result=self._enforce_known_people(result,spans,people)
+        result=self._enforce_known_contacts(result,spans,people)
         result=self._make_protective_entities_certain(result)
         result=self._dedupe_entities(result)
+        result=self._collapse_nested_identity_entities(result)
         by_id={span["span_id"]:span for span in spans}
         entities_raw=self._bind_known_identities(result.get("entities",[]),people)
         entities=[PrivacyEntity.model_validate(value) for value in entities_raw]
@@ -418,7 +570,7 @@ class PrivacyAgent:
                     raise ValueError("resolved_entity_without_edit")
         for span in spans:
             text=span["text"]
-            for pattern,kinds in ((EMAIL,{"personal_identifier"}),(PHONE,{"contact"}),(self._personal_id,{"personal_identifier"})):
+            for pattern,kinds in ((EMAIL,{"contact"}),(PHONE,{"contact"}),(self._personal_id,{"personal_identifier"})):
                 for match in pattern.finditer(text):
                     if not self._contains(entities,span["span_id"],match.start(),match.end(),kinds):
                         raise ValueError("deterministic_candidate_missed")
@@ -447,21 +599,29 @@ class PrivacyAgent:
         return validated
 
     async def _generate(self, payload, prior=None, error=None):
-        system=(
-            "Find personal information in every supplied span. Return one JSON object containing only entities. "
+        candidate_mode="candidates" in payload
+        system=((
+            "Classify every supplied candidate exactly once. Do not inspect the source for additional entities and do not "
+            "return any substring that is not in candidates. Return one JSON object containing only entities. "
+        ) if candidate_mode else (
+            "Find every occurrence of personal information in every supplied span. Return one JSON object containing only entities. "
+        )) + (
             "For each entity return span_id, expected_text copied verbatim from that span, kind, and identity_hint. "
-            "Kinds are person, contact, role, and organization. Exact personal identifiers are handled separately "
-            "by the application and are not a semantic kind. Contact includes postal addresses. Classify job titles, responsibilities, offices, departments, honorifics, and "
+            "Kinds are person, contact, role, organization, and other. Use other for dates, locations, ordinary text, "
+            "or any detector candidate that is not personal information. Contact includes email addresses, phone numbers, "
+            "and postal addresses; every such candidate must receive a contact decision. Classify job titles, responsibilities, offices, departments, honorifics, and "
             "organization-plus-title labels as role or organization, never person. Return those non-person labels "
             "so the application can verify that the distinction was made. "
+            "Names in email From, To, and Cc headers, greetings, signatures, transcript speaker labels, and body text "
+            "are person occurrences and must each be returned, including repeated occurrences of the same person. "
             "For a person, compare spelling variants, shortened names, initials, and transcription variants against "
             "the aliases and derived name_variants in known_identities. If source text exactly matches a name_variant "
             "belonging to exactly one identity, classify it as person and use that identity ID. For other person "
             "variants, set identity_hint to a supplied ID only when the "
-            "reference is unambiguous and context supports it; otherwise null. For every non-person kind, "
+            "reference is unambiguous and context supports it; otherwise null. A contact may use a known identity ID "
+            "only when the surrounding context clearly establishes ownership. For role, organization, and other, "
             "identity_hint must be null. "
-            "When PII is ambiguous, use personal_identifier. Do not emit organizations, roles, dates, business status, "
-            "private circumstances, warnings, or ordinary prose. Never invent source text. The application owns offsets, "
+            "Do not emit dates, business status, private circumstances, warnings, or ordinary prose. Never invent source text. The application owns offsets, "
             "coverage, identity binding, confidence, and edits."
         )
         request=dict(payload)
@@ -471,9 +631,116 @@ class PrivacyAgent:
             request["instruction"]="Correct the rejected output once; do not change or omit source coverage."
         try:
             return await self.provider.generate("privacy",system,request,max_tokens=2048,
-                                                json_schema=self.response_schema,temperature=0)
+                                                json_schema=self.mapper_schema if candidate_mode else self.response_schema,
+                                                temperature=0)
         except Exception:
             raise DomainError("provider_unavailable") from None
+
+    async def _detect(self, payload):
+        if hasattr(self.detector_provider,"detect"):
+            values=await self.detector_provider.detect(payload["spans"])
+            return {"candidates":[{"span_id":value.get("span_id"),
+                "start":value.get("start"),"end":value.get("end"),
+                "expected_text":value.get("expected_text"),
+                "signals":[{"source":"gliner","label":value.get("label"),
+                            "confidence":value.get("confidence")}]} for value in values]}
+        system=(
+            "Mark possible personal-information substrings for a second model to classify. Over-detect person names, "
+            "initials, shortened names, speaker labels, header names, signatures, addresses, locations, dates, and "
+            "role-like text that could be mistaken for a person. Include every human-name-like substring, especially "
+            "names after From, To, Cc, greetings, attendee labels, and transcript speaker labels. Initials such as LF "
+            "and full names such as Lena Fischer are separate candidates. Do not classify or map anything. Return only exact "
+            "verbatim substrings and their span_id. Do not return ordinary prose, punctuation, or whole spans when a "
+            "shorter candidate identifies the possible item."
+        )
+        try:
+            return await self.detector_provider.generate("privacy_detector",system,payload,max_tokens=1536,
+                json_schema=self.detector_schema,temperature=0)
+        except Exception:
+            raise DomainError("provider_unavailable") from None
+
+    async def _map_candidate_chunks(self,payload,prior=None,error=None):
+        decisions=[]
+        prior_by_id={value.get("candidate_id"):value for value in (prior or {}).get("decisions",[])}
+        candidates=payload["candidates"]
+        for offset in range(0,len(candidates),12):
+            chunk=candidates[offset:offset+12]
+            expected={value["candidate_id"] for value in chunk}
+            accepted={candidate_id:value for candidate_id,value in prior_by_id.items()
+                      if candidate_id in expected}
+            result={"decisions":[]}
+            for attempt in range(4):
+                missing=[value for value in chunk if value["candidate_id"] not in accepted]
+                if not missing:break
+                request={**payload,"candidates":missing}
+                result=await self._generate(request,result if result["decisions"] else None,
+                    error or "Classify every remaining candidate_id exactly once")
+                seen=set()
+                for value in result.get("decisions",[]):
+                    candidate_id=value.get("candidate_id")
+                    if candidate_id in expected and candidate_id not in seen:
+                        accepted[candidate_id]=value;seen.add(candidate_id)
+            if set(accepted)!=expected:
+                logger.error(
+                    "privacy candidate coverage failed record=%s batch=%s expected=%s actual=%s",
+                    payload.get("record_id"), payload.get("batch_index"), sorted(expected),
+                    sorted(accepted),
+                )
+                raise DomainError("privacy_unresolved")
+            decisions.extend(accepted[value["candidate_id"]] for value in chunk)
+        return {"decisions":decisions}
+
+    @classmethod
+    def _regex_candidates(cls,spans,people):
+        values=[]
+        for span in spans:
+            for pattern,label in ((EMAIL,"email"),(PHONE,"phone_number"),(cls._personal_id,"explicit_identifier")):
+                for match in pattern.finditer(span["text"]):
+                    values.append({"span_id":span["span_id"],"start":match.start(),"end":match.end(),
+                        "expected_text":match.group(),"signals":[{"source":"regex","label":label,"confidence":1.0}]})
+            for person in (people or {}).values():
+                for variant in cls._identity_variants(person):
+                    for match in re.finditer(r"(?<!\w)"+re.escape(variant)+r"(?!\w)",span["text"],re.I):
+                        values.append({"span_id":span["span_id"],"start":match.start(),"end":match.end(),
+                            "expected_text":match.group(),"signals":[{"source":"regex","label":"registered_name_variant","confidence":1.0}]})
+        return values
+
+    @staticmethod
+    def _candidate_contexts(candidates,spans,radius=180):
+        by_id={span["span_id"]:(index,span["text"]) for index,span in enumerate(spans)};result=[]
+        for index,candidate in enumerate(candidates):
+            span_index,text=by_id[candidate["span_id"]];start=candidate["start"];end=candidate["end"]
+            current=(text[max(0,start-radius):start]+"<<"+text[start:end]+">>"+
+                     text[end:min(len(text),end+radius)])
+            context=[]
+            for neighbor in range(max(0,span_index-2),min(len(spans),span_index+3)):
+                value=current if neighbor==span_index else spans[neighbor]["text"][:360]
+                context.append({"relative_line":neighbor-span_index,"text":value})
+            result.append({"candidate_id":f"candidate-{index}","expected_text":candidate["expected_text"],
+                "detector_signals":candidate.get("signals",[]),"context_lines":context})
+        return result
+
+    @staticmethod
+    def _validate_candidates(result, spans):
+        by_id={span["span_id"]:span["text"] for span in spans}
+        candidates=[];by_key={}
+        for item in result.get("candidates",[]):
+            span_id=item.get("span_id");expected=item.get("expected_text")
+            text=by_id.get(span_id)
+            if not isinstance(text,str) or not isinstance(expected,str) or not expected:
+                raise ValueError("invalid_candidate")
+            start=item.get("start");end=item.get("end")
+            if type(start) is not int or type(end) is not int or text[start:end]!=expected:
+                matches=[match.start() for match in re.finditer(re.escape(expected),text)]
+                if len(matches)!=1:raise ValueError("ambiguous_candidate")
+                start=matches[0];end=start+len(expected)
+            key=(span_id,start,end)
+            if key not in by_key:
+                by_key[key]={"span_id":span_id,"start":start,"end":end,"expected_text":expected,"signals":[]}
+                candidates.append(by_key[key])
+            for signal in item.get("signals",[]):
+                if signal not in by_key[key]["signals"]:by_key[key]["signals"].append(signal)
+        return candidates
 
     async def plan(self,project_id,record_id,record_version,spans,source_hash,people=None,resolutions=None,identity_revision=0):
         source_spans=[span for span in spans if not span["span_id"].startswith("title:")]
@@ -492,18 +759,54 @@ class PrivacyAgent:
                      "admin_resolutions":batch_resolutions,
                      "previous_context":spans[spans.index(batch[0])-1]["text"][-500:] if spans.index(batch[0]) else None,
                      "next_context":spans[spans.index(batch[-1])+1]["text"][:500] if spans.index(batch[-1])+1<len(spans) else None,
-                     "spans":[{"span_id":span["span_id"],"text":self._model_text(span["text"],people)} for span in batch]}
+                     "spans":[{"span_id":span["span_id"],"text":span["text"] if self.detector_provider is not None
+                               else self._model_text(span["text"],people)} for span in batch]}
             hashes.append(hashlib.sha256(json.dumps(payload["spans"],ensure_ascii=False,sort_keys=True).encode()).hexdigest())
-            result=await self._generate(payload)
+            candidates=None
+            if self.detector_provider is not None:
+                try:
+                    detected=self._validate_candidates(await self._detect(payload),payload["spans"])
+                    candidates=self._validate_candidates({"candidates":[*detected,*self._regex_candidates(batch,people)]},batch)
+                except ValueError as exc:
+                    logger.error("privacy detector validation failed record=%s batch=%s error=%r", record_id, index, exc)
+                    raise DomainError("privacy_unresolved") from None
+                payload["candidates"]=self._candidate_contexts(candidates,batch)
+                payload.pop("spans")
+                payload["instruction"]=(
+                    "Classify every candidate exactly once. Use person only for a human name or name variant; map it "
+                    "to one known identity when supported, otherwise use a NEW_ identity hint. Use role or organization "
+                    "for non-person labels. Omit no candidate and introduce no source substring outside candidates."
+                )
+            if candidates is None:result=await self._generate(payload)
+            elif not candidates:result={"decisions":[]}
+            else:result=await self._map_candidate_chunks(payload)
             for attempt in range(4):
                 try:
+                    if candidates is not None:
+                        by_candidate={value["candidate_id"]:source for value,source in zip(payload["candidates"],candidates)}
+                        decisions=result.get("decisions",[])
+                        if {value.get("candidate_id") for value in decisions}!=set(by_candidate) or len(decisions)!=len(by_candidate):
+                            raise ValueError("candidate_coverage_mismatch")
+                        result={"entities":[{"span_id":by_candidate[value["candidate_id"]]["span_id"],
+                            "start":by_candidate[value["candidate_id"]]["start"],
+                            "end":by_candidate[value["candidate_id"]]["end"],
+                            "expected_text":by_candidate[value["candidate_id"]]["expected_text"],
+                            "source_bound":True,"kind":value["kind"],
+                            "identity_hint":value["identity_hint"]} for value in decisions]}
                     entities,edits,reasons=self._validate_batch(result,batch,batch_resolutions,people)
                     break
                 except Exception as exc:
                     if attempt == 3:
+                        logger.error(
+                            "privacy validation failed record=%s batch=%s candidates=%s error=%r entities=%s edits=%s",
+                            record_id, index, len(candidates or []), exc,
+                            [(e.get("expected_text"),e.get("kind"),e.get("start"),e.get("end")) for e in result.get("entities",[])],
+                            [(e.get("expected_text"),e.get("reason"),e.get("start"),e.get("end")) for e in result.get("edits",[])],
+                        )
                         raise DomainError("privacy_unresolved") from None
                     corrections+=1
-                    result=await self._generate(payload,result,str(exc))
+                    result=(await self._map_candidate_chunks(payload,result,str(exc))
+                            if candidates is not None and candidates else await self._generate(payload,result,str(exc)))
             reasons=[]
             all_entities.extend(entities);all_edits.extend(edits);all_reasons.extend(reasons)
             covered.extend(span["span_id"] for span in batch)

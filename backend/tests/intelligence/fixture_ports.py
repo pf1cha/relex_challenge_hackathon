@@ -26,6 +26,7 @@ class CanonicalFixture:
         return saved
     async def published_context(self,cap):return WorkReadContext(project_id=self.project_id,job_id=cap.job_id,capability_id=cap.capability_id,snapshot=Snapshot(corpus_generation=1,privacy_generation=0))
     async def read_history(self,ctx,query,page):return HistoryPage(items=[e for e in self.events if e.topic_id==query.topic_id and e.scope==query.scope],next_cursor=None,coverage=Coverage(state='complete',records=[],limitations=[]))
+    async def list_history_candidates(self,ctx,page):return HistoryPage(items=list(self.events),next_cursor=None,coverage=Coverage(state='complete',records=[],limitations=[]))
     async def prepare(self,cap,input):
         if input.idempotency_key in self.ops:return self.ops[input.idempotency_key]
         ticket=OperationTicket(operation=IndexOperation(id=str(uuid4()),job_id=cap.job_id,project_id=cap.project_id,action=input.action,entry_ids=input.entry_ids,lifecycle_revision=cap.lifecycle_revision,state='pending'),completion_token=str(uuid4()))

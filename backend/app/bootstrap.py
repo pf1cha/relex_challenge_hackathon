@@ -26,6 +26,7 @@ class Runtime:
             result["model"]="unconfigured"
         return result
     async def close(self):
+        await self.evidence.privacy_agent.close()
         await self.provider.close()
         await self.index.close()
         await self.evidence.db.close()
@@ -33,7 +34,7 @@ class Runtime:
 def build_runtime(settings: RuntimeSettings | None = None) -> Runtime:
     from app.evidence.postgres import Postgres
     from app.evidence.service import EvidencePlatform
-    from app.evidence.privacy import PrivacyAgent
+    from app.evidence.privacy import GlinerDetectorClient, PrivacyAgent
     from app.intelligence.providers import ModelProvider, ProviderSettings
     from app.intelligence.qdrant import QdrantIndex
     from app.intelligence.service import Intelligence
@@ -48,13 +49,17 @@ def build_runtime(settings: RuntimeSettings | None = None) -> Runtime:
         timeout_seconds=min(120,settings.http.request_timeout_seconds)))
     privacy_provider=ModelProvider(ProviderSettings(base_url=settings.privacy_model_url,
         model=settings.privacy_model_name,api_key=settings.privacy_model_key,
-        timeout_seconds=min(120,settings.http.request_timeout_seconds)))
+        timeout_seconds=settings.http.request_timeout_seconds))
     index=QdrantIndex(settings.qdrant_url,settings.collection,settings.qdrant_key)
-    evidence.privacy_agent = PrivacyAgent(privacy_provider)
-    limits=RuntimeLimits(answer_search_rounds=3,repair_search_rounds=1,reviewer_passes=3,
+    # GLiNER and regex propose exact source candidates. Local Qwen performs
+    # semantic classification and person-identity mapping.
+    evidence.privacy_agent = PrivacyAgent(privacy_provider,
+        detector_provider=GlinerDetectorClient(settings.pii_detector_url,
+            settings.http.request_timeout_seconds))
+    limits=RuntimeLimits(answer_search_rounds=20,repair_search_rounds=1,reviewer_passes=3,
         reviewer_search_rounds=3,tool_calls_per_phase=int(os.environ.get("RELEX_TOOL_CALLS_PER_PHASE","24")),
         pages_per_phase=int(os.environ.get("RELEX_PAGES_PER_PHASE","24")),
-        source_tokens_per_phase=int(os.environ.get("RELEX_SOURCE_TOKENS_PER_PHASE","24000")),
+        source_tokens_per_phase=int(os.environ.get("RELEX_SOURCE_TOKENS_PER_PHASE","128000")),
         request_deadline_seconds=settings.http.request_timeout_seconds)
     intelligence=Intelligence(evidence.reader,evidence.retrieval,evidence.artifacts,evidence.ledger,
         provider,index,limits,settings.secret.encode())

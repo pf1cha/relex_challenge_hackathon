@@ -34,6 +34,7 @@ class RuntimeSettings:
     privacy_model_url: str = ""
     privacy_model_name: str = ""
     privacy_model_key: str = field(repr=False, default="")
+    pii_detector_url: str = "http://127.0.0.1:8002"
     embedding_url: str = ""
     embedding_model: str = ""
     embedding_key: str = field(repr=False, default="")
@@ -64,6 +65,7 @@ class RuntimeSettings:
             privacy_model_url=e.get("RELEX_PRIVACY_MODEL_BASE_URL") or model_url,
             privacy_model_name=e.get("RELEX_PRIVACY_MODEL_NAME") or model_name,
             privacy_model_key=e.get("RELEX_PRIVACY_MODEL_API_KEY") or model_key,
+            pii_detector_url=e.get("RELEX_PII_DETECTOR_URL", "http://127.0.0.1:8002"),
             embedding_url=e.get("RELEX_EMBEDDING_BASE_URL", "https://api.openai.com/v1"),
             embedding_model=e.get("RELEX_EMBEDDING_MODEL", ""),
             embedding_key=e.get("RELEX_EMBEDDING_API_KEY") or e.get("OPENAI_API_KEY", ""))

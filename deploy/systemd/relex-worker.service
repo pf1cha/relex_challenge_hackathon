@@ -1,7 +1,7 @@
 [Unit]
 Description=Relex durable worker
-Requires=relex-migrate.service relex-qdrant.service
-After=relex-migrate.service relex-qdrant.service
+Requires=relex-migrate.service relex-qdrant.service relex-privacy-model.service relex-pii-detector.service
+After=relex-migrate.service relex-qdrant.service relex-privacy-model.service relex-pii-detector.service
 PartOf=relex.target
 
 [Service]

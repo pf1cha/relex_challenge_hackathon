@@ -448,6 +448,55 @@ class EvidencePlatform:
                 self._invalidate(s,privacy=True)
             return p
 
+    def _stale_review(self,s,event):
+        prior=[HistoryEvent.model_validate(s["history"][prior_id]) for prior_id in event.prior_event_ids if prior_id in s["history"]]
+        require(len(prior)==len(event.prior_event_ids),"source_unavailable")
+        project_id=event.evidence[0].project_id
+        prior_refs={(ref.record_id,ref.record_version,tuple(ref.span_ids)) for item in prior for ref in item.evidence}
+        stale=[];marking=[]
+        for item in prior:
+            for ref in item.evidence:
+                receipt=self._receipt(s,project_id,ref)
+                if receipt.id not in {value.id for value in stale}:stale.append(receipt)
+        for ref in event.evidence:
+            if (ref.record_id,ref.record_version,tuple(ref.span_ids)) in prior_refs:continue
+            receipt=self._receipt(s,project_id,ref)
+            if receipt.id not in {value.id for value in marking}:marking.append(receipt)
+        reason=event.automated_reason or f"The automated chronology review linked this later {event.kind} to the earlier decision. Confirm the source evidence before applying the stale marking."
+        require(stale and marking,"source_unavailable")
+        return StaleReview(id=event.id,kind=event.kind,scope=event.scope,
+            proposed_change=event.text,reason=reason,
+            state={"not_required":"pending","pending":"pending","approved":"approved","rejected":"rejected"}[event.human_review_state],
+            stale_evidence=stale,marking_evidence=marking,created_at=event.learned_at,
+            reviewed_by=event.human_reviewed_by,reviewed_at=event.human_reviewed_at)
+
+    async def list_stale_reviews(self,ctx,page):
+        async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
+            items=[]
+            for raw in s["history"].values():
+                event=HistoryEvent.model_validate(raw)
+                legacy=event.kind in {"replacement","correction","cancellation","reinstatement"} and event.prior_event_ids and event.review_state=="passed"
+                if event.human_review_state=="not_required" and not legacy:continue
+                items.append(self._stale_review(s,event))
+            items.sort(key=lambda item:({"pending":0,"approved":1,"rejected":2}[item.state],item.created_at,item.id))
+            return self._page(items,page,self._binding(ctx,s,"stale-reviews"))
+
+    async def decide_stale_review(self,ctx,event_id,decision):
+        require(decision in ("approve","reject"),"invalid_input")
+        async with self.transaction(ctx,admin=True,write=True,restricted=True) as (_,s):
+            raw=s["history"].get(event_id);require(raw,"not_found")
+            event=HistoryEvent.model_validate(raw)
+            legacy=event.human_review_state=="not_required" and event.review_state=="passed" and event.kind in {"replacement","correction","cancellation","reinstatement"} and event.prior_event_ids
+            require(legacy or (event.human_review_state=="pending" and event.review_state=="pending"),"invalid_input")
+            self._stale_review(s,event)
+            event.human_review_state="approved" if decision=="approve" else "rejected"
+            event.review_state="passed" if decision=="approve" else "failed"
+            event.human_reviewed_by=ctx.user_id
+            event.human_reviewed_at=now()
+            s["history"][event.id]=dump(event)
+            self._invalidate(s)
+            return self._stale_review(s,event)
+
     def _active_lifecycle(self,s,kind,target):
         for job in s["jobs"].values():
             if target in job["work"]["document_ids"]+job["work"]["person_ids"] and job["public"]["state"] in ("pending","running","failed"):
@@ -758,12 +807,28 @@ class EvidencePlatform:
             for raw in s["history"].values():
                 event=HistoryEvent.model_validate(raw)
                 if event.topic_id!=query.topic_id or event.scope!=query.scope or event.review_state!="passed":continue
+                if event.kind in {"replacement","correction","cancellation","reinstatement"} and event.human_review_state!="approved":continue
                 try:
                     for ref in event.evidence:self._receipt(s,ctx.project_id,ref)
                 except DomainError:continue
                 items.append(event)
             result=self._page(sorted(items,key=lambda e:(e.learned_at,e.id)),page,self._binding(ctx,s,"history",dump(query)))
             return HistoryPage(items=result.items,next_cursor=result.next_cursor,coverage=Coverage(state="partial" if result.next_cursor else "complete",records=[],limitations=[]))
+
+    async def list_history_candidates(self,ctx,page):
+        async with self.transaction(ctx,fresh=True) as (_,s):
+            items=[]
+            for raw in s["history"].values():
+                event=HistoryEvent.model_validate(raw)
+                if event.review_state!="passed":continue
+                if event.kind in {"replacement","correction","cancellation","reinstatement"} and event.human_review_state!="approved":continue
+                try:
+                    for ref in event.evidence:self._receipt(s,ctx.project_id,ref)
+                except DomainError:continue
+                items.append(event)
+            result=self._page(sorted(items,key=lambda event:(event.learned_at,event.id)),page,self._binding(ctx,s,"history-candidates"))
+            return HistoryPage(items=result.items,next_cursor=result.next_cursor,
+                coverage=Coverage(state="partial" if result.next_cursor else "complete",records=[],limitations=[]))
 
     def _cap(self,s,cap):
         j=s["jobs"].get(cap.job_id);require(j,"capability_denied")

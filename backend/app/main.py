@@ -249,6 +249,15 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
         return await services.administration.associate_person(ctx,body)
     @app.post(base+"/people/{id}/erase",response_model=Job,status_code=202,dependencies=no_input)
     async def erase(id: Id,ctx=Depends(admin)): return await services.administration.erase_person(ctx,id)
+    @app.get(base+"/stale-reviews",response_model=Page[StaleReview])
+    async def stale_reviews(ctx=Depends(admin),paging=Depends(page)):
+        return await services.administration.list_stale_reviews(ctx,paging)
+    @app.post(base+"/stale-reviews/{id}/approve",response_model=StaleReview,dependencies=no_input)
+    async def approve_stale_review(id: Id,ctx=Depends(admin)):
+        return await services.administration.decide_stale_review(ctx,id,"approve")
+    @app.post(base+"/stale-reviews/{id}/reject",response_model=StaleReview,dependencies=no_input)
+    async def reject_stale_review(id: Id,ctx=Depends(admin)):
+        return await services.administration.decide_stale_review(ctx,id,"reject")
     @app.get(base+"/privacy/diagnostics",response_model=Page[PrivacyDiagnostic])
     async def privacy_diagnostics(ctx=Depends(admin),paging=Depends(page)):
         return await services.administration.list_privacy_diagnostics(ctx,paging)

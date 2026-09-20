@@ -1,6 +1,6 @@
 """Durable fenced jobs and external-write ledger. Network work is outside SQL locks."""
 from __future__ import annotations
-import asyncio, json, secrets, hashlib
+import asyncio, json, secrets, hashlib, logging, os
 from datetime import timedelta, datetime
 from psycopg.types.json import Jsonb
 from ..contracts.models import *
@@ -8,7 +8,9 @@ from ..contracts.errors import DomainError
 from ..contracts.hashing import compact, artifact_key
 from .service import now,iso,uid,dump,require
 from .parsing import parse
-from .privacy import normalize, person_occurs, validate_sanitized
+from .privacy import EMAIL, PHONE, normalize, person_occurs, validate_sanitized
+
+logger = logging.getLogger(__name__)
 
 
 def _proposed_person_id(plan_id, hint, value, aliases, batch_ids):
@@ -17,13 +19,86 @@ def _proposed_person_id(plan_id, hint, value, aliases, batch_ids):
         return batch_ids[hint]
     if aliases.get(value.casefold()):
         return None
-    person_id="PERSON_"+hashlib.sha256((plan_id+":"+hint).encode()).hexdigest()[:16]
+    # Keep the model proposal stable across records and closure passes.
+    # plan_id is per-record and would manufacture duplicate people.
+    person_id="PERSON_"+hashlib.sha256(hint.encode()).hexdigest()[:16]
     batch_ids[hint]=person_id
     return person_id
 
 
 def _known_person_matches(value, aliases, first_names):
     return aliases.get(value.casefold(),set()) or first_names.get(value.casefold(),set())
+
+
+def _name_reference_variants(display_name):
+    parts=display_name.strip().split()
+    if len(parts)<2:return set()
+    return {parts[0].casefold(),parts[-1].casefold(),"".join(part[0] for part in parts).casefold()}
+
+
+def _register_identity_proposals(state, plan):
+    """Commit source-bound model proposals so the next record sees them."""
+    aliases={}
+    for pid,person in state["people"].items():
+        for alias in [person["display_name"],*[c["value"] for c in person.get("contacts",[])]]:
+            aliases.setdefault(alias.casefold(),set()).add(pid)
+    created=0;batch_ids={}
+    proposals=[entity for entity in plan["entities"] if
+               entity["kind"]=="person" and entity["confidence"]=="certain" and
+               entity.get("identity_hint","").startswith("NEW_")]
+    full_name_hints={}
+    for entity in proposals:
+        parts=entity["expected_text"].strip().split()
+        if len(parts)>1:
+            for variant in _name_reference_variants(entity["expected_text"]):
+                full_name_hints.setdefault(variant,set()).add(entity["identity_hint"])
+    # Establish full names before shortened occurrences from the same record.
+    # A unique first-name reference can then reuse the full-name proposal; a
+    # shared first name remains separate for semantic/admin resolution.
+    proposals.sort(key=lambda entity: -len(entity["expected_text"].strip().split()))
+    for entity in proposals:
+        hint=entity.get("identity_hint")
+        value=entity["expected_text"].strip();parts=value.split()
+        if len(parts)==1 and len(full_name_hints.get(value.casefold(),set()))==1:
+            hint=next(iter(full_name_hints[value.casefold()]));entity["identity_hint"]=hint
+        matches=aliases.get(value.casefold(),set())
+        if not matches and len(parts)==1:
+            matches={pid for pid,person in state["people"].items()
+                     if value.casefold() in _name_reference_variants(person["display_name"])}
+        if len(matches)==1:
+            pid=next(iter(matches))
+        elif matches:
+            continue
+        else:
+            pid=_proposed_person_id(plan["plan_id"],hint,value,aliases,batch_ids)
+        if pid and pid not in state["people"]:
+            state["people"][pid]=dump(Person(id=pid,display_name=value,kind="client",contacts=[],state="active"))
+            aliases.setdefault(value.casefold(),set()).add(pid);created+=1
+        if pid:entity["identity_hint"]=pid
+    for entity in plan["entities"]:
+        if entity["kind"] not in ("contact","personal_identifier") or entity.get("identity_hint") not in state["people"]:
+            continue
+        value=entity["expected_text"].strip();person=state["people"][entity["identity_hint"]]
+        if EMAIL.fullmatch(value):kind="email"
+        elif PHONE.fullmatch(value):kind="phone"
+        elif entity["kind"]=="contact":kind="postal_address"
+        else:continue
+        contact={"kind":kind,"value":value}
+        if contact not in person.get("contacts",[]):person.setdefault("contacts",[]).append(contact)
+    return plan,created
+
+
+def _merge_privacy_plans(previous,current):
+    """Union independently validated semantic findings at exact source ranges."""
+    merged=dict(current)
+    entities={(value["span_id"],value["start"],value["end"]):value for value in previous["entities"]}
+    entities.update({(value["span_id"],value["start"],value["end"]):value for value in current["entities"]})
+    edits={(value["span_id"],value["start"],value["end"]):value for value in previous["edits"]}
+    edits.update({(value["span_id"],value["start"],value["end"]):value for value in current["edits"]})
+    merged["entities"]=list(entities.values());merged["edits"]=list(edits.values())
+    merged["corrections_used"]=previous.get("corrections_used",0)+current.get("corrections_used",0)
+    merged["batch_hashes"]=list(dict.fromkeys(previous.get("batch_hashes",[])+current.get("batch_hashes",[])))
+    return merged
 
 
 def _remove_affected_raw_sources(state, document_ids):
@@ -41,6 +116,16 @@ RECONCILIATION_REASONS={
     "same-name identity requires admin resolution", "person lacks evidence-bound identity proposal",
     "semantic classification unresolved", "identity edit is unresolved",
 }
+
+
+async def _process_records(handlers,cap,refs,concurrency=None):
+    limit=concurrency or int(os.environ.get("RELEX_RECORD_CONCURRENCY","4"))
+    require(1<=limit<=16,"contract_violation")
+    semaphore=asyncio.Semaphore(limit)
+    async def process(ref):
+        async with semaphore:
+            return await handlers.process_record(cap,ref)
+    return await asyncio.gather(*(process(ref) for ref in refs))
 
 SEQUENCES={
 "ingest":["received","parsed","privacy_ready","extracted","indexed","published"],
@@ -255,22 +340,71 @@ class Jobs:
             if agent is None:raise DomainError("provider_unavailable")
             plans=[]
             model=getattr(getattr(agent.provider,"settings",None),"model",None) or "configured-model"
-            for record,spans,saved,people,resolutions,privacy_generation in private_records:
+            for record,spans,saved,_,resolutions,_ in private_records:
                 lease=await self.heartbeat(lease)
+                people,privacy_generation=await self._mutate(
+                    lease,lambda s,j:(dict(s["people"]),s["privacy_generation"]))
                 reusable=(saved and saved.get("complete") and saved.get("source_hash")==record["source_hash"] and
                           saved.get("policy_version")==agent.policy_version and saved.get("prompt_version")==agent.prompt_version and
                           saved.get("model_version")==model and saved.get("identity_revision")==privacy_generation and
                           all(not entity.get("identity_hint") or not entity["identity_hint"].startswith("PERSON_") or
                               entity["identity_hint"] in people for entity in saved.get("entities",[])))
-                if reusable:plans.append(PrivacyPlan.model_validate(saved))
-                else:plans.append(await agent.plan(lease.job.project_id,record["record_id"],record["record_version"],spans,
-                    record["source_hash"],people,resolutions,privacy_generation))
+                if reusable:plan=PrivacyPlan.model_validate(saved)
+                else:plan=await agent.plan(lease.job.project_id,record["record_id"],record["record_version"],spans,
+                    record["source_hash"],people,resolutions,privacy_generation)
+                raw,created=await self._mutate(
+                    lease,lambda s,j:_register_identity_proposals(s,dump(plan)))
+                plans.append(PrivacyPlan.model_validate(raw))
                 lease=await self.heartbeat(lease)
+
+            # Semantic closure catches occurrences omitted before the complete
+            # identity registry existed. Only model-returned, source-bound
+            # findings are merged; no lexical discovery is performed here.
+            # Continue until a full semantic pass discovers nothing new. The
+            # generous guard prevents a pathological provider from looping
+            # forever without turning discovery into lexical matching.
+            for closure_round in range(max(8, len(private_records) + 2)):
+                closure=[];created_total=0
+                for index,(record,spans,_,_,resolutions,_) in enumerate(private_records):
+                    people,privacy_generation=await self._mutate(
+                        lease,lambda s,j:(dict(s["people"]),s["privacy_generation"]))
+                    fresh=await agent.plan(lease.job.project_id,record["record_id"],record["record_version"],spans,
+                        record["source_hash"],people,resolutions,privacy_generation)
+                    merged=_merge_privacy_plans(dump(plans[index]),dump(fresh))
+                    merged,created=await self._mutate(
+                        lease,lambda s,j,merged=merged:_register_identity_proposals(s,merged))
+                    closure.append(PrivacyPlan.model_validate(merged));created_total+=created
+                    lease=await self.heartbeat(lease)
+                plans=closure
+                logger.info("privacy closure job=%s round=%s identities_created=%s", lease.job.id, closure_round, created_total)
+                if created_total==0:break
+            else:
+                logger.error("privacy closure did not converge job=%s records=%s rounds=%s", lease.job.id, len(private_records), max(8, len(private_records) + 2))
+                raise DomainError("privacy_unresolved")
 
             def persist(s,j):
                 new_ids={}
-                for incoming in plans:
-                    plan=dump(incoming);record=s["records"][plan["record_id"]]
+                raw_plans=[dump(incoming) for incoming in plans]
+                aliases={}
+                for pid,person in s["people"].items():
+                    for alias in [person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]]:
+                        aliases.setdefault(alias.casefold(),set()).add(pid)
+                # Register model-established people across the complete upload
+                # before compiling any record's final edit map.
+                for plan in raw_plans:
+                    for entity in plan["entities"]:
+                        if entity["kind"]!="person" or entity["confidence"]!="certain":
+                            continue
+                        value=entity["expected_text"].strip();hint=entity.get("identity_hint")
+                        if hint and hint.startswith("NEW_"):
+                            pid=_proposed_person_id(plan["plan_id"],hint,value,aliases,new_ids)
+                            if pid is not None:
+                                if pid not in s["people"]:
+                                    s["people"][pid]=dump(Person(id=pid,display_name=value,kind="client",contacts=[],state="active"))
+                                    aliases.setdefault(value.casefold(),set()).add(pid)
+                                entity["identity_hint"]=pid
+                for plan in raw_plans:
+                    record=s["records"][plan["record_id"]]
                     require(record["record_version"]==plan["record_version"] and record["source_hash"]==plan["source_hash"],"evidence_changed")
                     by_id={"title:"+record["record_id"]:s["documents"][record["original_doc_id"]]["raw_filename"],
                            **{span["span_id"]:span["text"] for span in record["raw_spans"]}}
@@ -552,7 +686,7 @@ async def run_once(platform,handlers,worker_id="worker"):
                 if lease.job.state=="failed":return True
             if lease.job.stage=="privacy_ready":
                 cap=await jobs.capability(lease,lease.job.stage)
-                for ref in lease.work.record_versions:results.append(await handlers.process_record(cap,ref))
+                results=await _process_records(handlers,cap,lease.work.record_versions)
                 lease=await jobs.save_results(lease,results)
                 lease=await jobs.advance(lease,"privacy_ready","extracted",{"records":len(lease.work.record_versions)})
             if lease.job.stage=="extracted":lease=await jobs.advance(lease,"extracted","indexed",lease.job.counts)
@@ -560,14 +694,14 @@ async def run_once(platform,handlers,worker_id="worker"):
             if lease.job.stage=="received":lease=await jobs.advance(lease,"received","rebuilding",{})
             if lease.job.stage=="rebuilding":
                 cap=await jobs.capability(lease,"rebuilding")
-                for ref in lease.work.record_versions:results.append(await handlers.process_record(cap,ref))
+                results=await _process_records(handlers,cap,lease.work.record_versions)
                 lease=await jobs.save_results(lease,results)
                 lease=await jobs.advance(lease,"rebuilding","indexed",{"records":len(lease.work.record_versions)})
         elif kind in ("erase_person","delete_document"):
             while lease.job.stage in ("invalidating","inventory","draining","sanitizing"):lease=await jobs.prepare_cleanup(lease)
             if lease.job.stage=="rebuilding":
                 cap=await jobs.capability(lease,"rebuilding")
-                for ref in lease.work.record_versions:results.append(await handlers.process_record(cap,ref))
+                results=await _process_records(handlers,cap,lease.work.record_versions)
                 lease=await jobs.save_results(lease,results)
                 lease=await jobs.advance(lease,"rebuilding","removing_index",{"records":len(lease.work.record_versions)})
             if lease.job.stage=="removing_index":

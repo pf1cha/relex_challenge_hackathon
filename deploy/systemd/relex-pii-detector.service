@@ -1,0 +1,20 @@
+[Unit]
+Description=Relex local GLiNER PII candidate detector
+After=network-online.target relex-privacy-model.service
+Wants=network-online.target
+PartOf=relex.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/mnt/relex-kai
+EnvironmentFile=/etc/relex/relex.env
+Environment=PYTHONPATH=/mnt/relex-kai/backend
+Environment=HF_HOME=/mnt/relex-kai/.runtime/huggingface
+ExecStart=/mnt/relex-kai/.tools/miniforge3/envs/relex/bin/python -m uvicorn app.pii_detector:app --host 127.0.0.1 --port 8002 --no-access-log
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=relex.target

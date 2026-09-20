@@ -93,6 +93,17 @@ class Answers:
             cannot_establish=reason,snapshot=snapshot(ctx))
         return ReviewedCandidate(**payload.model_dump(),review_results=[],candidate_digest=candidate_digest(payload),omission_proof=None)
 
+    def _require_human_review(self,status,references,session):
+        if status not in {"superseded","corrected"}:return
+        kinds={"corrected":{"correction"},"superseded":{"replacement","cancellation","reinstatement"}}[status]
+        cited={(ref["record_id"],ref["record_version"]) for ref in references}
+        approved=False
+        for event in session.approved_history_events:
+            evidence={(ref.record_id,ref.record_version) for ref in event.evidence}
+            if event.kind in kinds and cited and cited<=evidence:
+                approved=True;break
+        if not approved:raise DomainError("contract_violation")
+
     async def _draft(self,ctx,raw,session):
         if set(raw)-{"claims","cannot_establish"}:raise DomainError("contract_violation")
         claims=[];receipts=[]
@@ -124,6 +135,7 @@ class Answers:
             if effective is not None:
                 try:effective=SourceTime.model_validate(effective)
                 except (ValidationError,TypeError,ValueError):effective=SourceTime(value=None,precision="unknown",timezone=None)
+            self._require_human_review(value.get("status"),references,session)
             claims.append(Claim(id=str(uuid4()),text=value["text"],receipt_ids=list(dict.fromkeys(receipt_ids)),
                 status=value.get("status"),scope=value.get("scope"),effective_at=effective))
         receipts=list({r.id:r for r in receipts}.values())
@@ -164,6 +176,7 @@ class Answers:
         repair.discovered_records=set(session.discovered_records);repair.level2_records=set(session.level2_records)
         repair.source_records=set(session.source_records);repair.source_searches=session.source_searches
         repair.pending_searches=set(session.pending_searches);repair.pending_histories=set(session.pending_histories)
+        repair.approved_history_events=list(session.approved_history_events)
         repair.completed_calls=set(session.completed_calls)
         return repair
 

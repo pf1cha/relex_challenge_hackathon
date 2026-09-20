@@ -2,6 +2,7 @@
 Description=Relex local privacy model
 After=network-online.target
 Wants=network-online.target
+PartOf=relex.target
 
 [Service]
 Type=simple

@@ -139,7 +139,25 @@ def _public_document(document):
 
 
 def _public_record(record):
-    return {key: value for key, value in record.items() if key not in ("raw_spans", "source_hash")}
+    return {key: value for key, value in record.items()
+            if key not in ("raw_spans", "source_hash", "_purge_prior_versions")}
+
+
+async def _purge_prior_record_versions(conn, project_id, records):
+    """Remove superseded personal data after erasure dependencies are gone."""
+    for record_id, record in records.items():
+        if not record.get("_purge_prior_versions"):
+            continue
+        version=record["record_version"]
+        await conn.execute(
+            "DELETE FROM restricted_record_inputs WHERE project_id=%s AND record_id=%s",
+            (project_id,record_id))
+        await conn.execute(
+            "DELETE FROM record_spans WHERE project_id=%s AND record_id=%s AND record_version<>%s",
+            (project_id,record_id,version))
+        await conn.execute(
+            "DELETE FROM record_versions WHERE project_id=%s AND record_id=%s AND version<>%s",
+            (project_id,record_id,version))
 
 
 async def _sync_objects(conn, project_id, state):
@@ -458,6 +476,10 @@ async def sync_project(conn, project_id, state, *, restricted=False, scrub_legac
                 (resolution_id, project_id, resolution["admin_user_id"], resolution["decision"],
                  resolution.get("rationale", resolution["decision"]), resolution["record_version"], Jsonb(resolution)))
         await _prune(conn, "restricted_privacy_resolutions", project_id, set(resolutions), "id")
+
+    # Erasure rewrites retain only the sanitized current version. Run this after
+    # object/reference/privacy synchronization has removed old foreign-key edges.
+    await _purge_prior_record_versions(conn,project_id,records)
 
     if scrub_legacy:
         marker = {"authority": "relational-v3", "project_id": project_id,

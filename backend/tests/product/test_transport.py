@@ -95,3 +95,19 @@ async def test_admin_original_documents_and_identity_mapping_routes():
         mappings=await client.get("/api/projects/fixture-project/identity-mappings?q=PERSON_fixture")
         assert mappings.status_code==200 and mappings.json()["items"][0]["display_name"]=="Fixture Person"
         assert (await client.get("/api/projects/fixture-project/identity-mappings?unknown=1")).status_code==422
+
+
+@pytest.mark.asyncio
+async def test_admin_can_review_stale_marking_with_csrf():
+    fixture=FixtureServices()
+    app=create_app(fixture.services(),HttpSettings(secure_cookie=False,allow_loopback_http=True))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://127.0.0.1:18080") as client:
+        headers={"Origin":"http://127.0.0.1:18080"}
+        login=await client.post("/api/login",json={"email":"fixture@synthetic.invalid","password":"synthetic-password"},headers=headers)
+        headers["X-CSRF-Token"]=login.json()["csrf_token"]
+        reviews=await client.get("/api/projects/fixture-project/stale-reviews")
+        assert reviews.status_code==200 and reviews.json()["items"][0]["state"]=="pending"
+        approved=await client.post("/api/projects/fixture-project/stale-reviews/stale-review/approve",headers=headers)
+        assert approved.status_code==200 and approved.json()["state"]=="approved"
+        assert fixture.calls[-1]==("stale_review","stale-review","approve")
+        assert (await client.post("/api/projects/fixture-project/stale-reviews/stale-review/reject")).status_code==403

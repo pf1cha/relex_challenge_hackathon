@@ -18,6 +18,7 @@ class ToolSession:
         self.records={};self.spans={};self.dependencies={};self.results=[];self.trace=[]
         self.discovered_records=set();self.level2_records=set();self.source_records=set();self.source_searches=0
         self.exhausted=False;self.pending_searches=set();self.pending_histories=set()
+        self.approved_history_events=[]
         self.completed_calls=set()
 
     def check(self):
@@ -112,6 +113,7 @@ class ToolSession:
             if result.next_cursor:self.pending_histories.add(history_key)
             else:self.pending_histories.discard(history_key)
             for event in result.items:
+                self.approved_history_events.append(event)
                 for ref in event.evidence:self.dependencies.setdefault((ref.record_id,ref.record_version),set()).update(ref.span_ids)
             trace_ids=[e.id for e in result.items]
         else:

@@ -6,7 +6,8 @@ import pytest
 
 from app.contracts.errors import DomainError
 from app.evidence.jobs import (RECONCILIATION_REASONS, _known_person_matches,
-                               _proposed_person_id, _remove_affected_raw_sources)
+                               _merge_privacy_plans, _process_records, _proposed_person_id,
+                               _register_identity_proposals, _remove_affected_raw_sources)
 from app.evidence.parsing import parse
 from app.evidence.privacy import PrivacyAgent, validate_sanitized
 
@@ -24,7 +25,7 @@ class CorrectingProvider:
         assert schema["strict"] is True
         assert set(entity["required"]) == {"span_id", "kind", "expected_text", "identity_hint"}
         assert entity["properties"]["kind"]["enum"] == [
-            "person", "contact", "role", "organization"]
+            "person", "contact", "role", "organization", "other"]
         span = payload["spans"][0]
         name = "Åsa Öberg"
         return {
@@ -121,6 +122,39 @@ class OverclassifyingProvider:
         ]}
 
 
+class CandidateDetectorProvider:
+    settings = SimpleNamespace(model="small-detector")
+
+    async def generate(self, role, system, payload, **kwargs):
+        assert role == "privacy_detector"
+        assert "known_identities" in payload
+        return {"candidates": [
+            {"span_id": "s1", "expected_text": "LF"},
+            {"span_id": "s1", "expected_text": "Acme CFO"},
+            {"span_id": "s1", "expected_text": "30 April 2026"},
+        ]}
+
+
+class CandidateMapperProvider:
+    settings = SimpleNamespace(model="identity-mapper")
+
+    async def generate(self, role, system, payload, **kwargs):
+        assert role == "privacy"
+        assert [(value["candidate_id"],value["expected_text"]) for value in payload["candidates"]] == [
+            ("candidate-0", "LF"), ("candidate-1", "Acme CFO"),
+            ("candidate-2", "30 April 2026")]
+        assert all(value["context_lines"] == [{"relative_line": 0,
+            "text": value["context_lines"][0]["text"]}] for value in payload["candidates"])
+        assert all(f"<<{value['expected_text']}>>" in value["context_lines"][0]["text"]
+                   for value in payload["candidates"])
+        assert "spans" not in payload
+        return {"decisions": [
+            {"candidate_id": "candidate-0", "kind": "person", "identity_hint": "PERSON_lena"},
+            {"candidate_id": "candidate-1", "kind": "role", "identity_hint": None},
+            {"candidate_id": "candidate-2", "kind": "other", "identity_hint": None},
+        ]}
+
+
 def test_corpus_parser_is_lossless_and_preserves_known_boundaries():
     root = Path(__file__).resolve().parents[3] / "corpus" / "acme"
     files = sorted(root.glob("*/*.txt"))
@@ -164,6 +198,87 @@ def test_unique_first_name_binding_matches_privacy_planner():
         "Marco", {"marco rossi": {"PERSON_marco"}}, {"marco": {"PERSON_marco"}}) == {"PERSON_marco"}
     assert _known_person_matches(
         "Alex", {}, {"alex": {"PERSON_one", "PERSON_two"}}) == {"PERSON_one", "PERSON_two"}
+
+
+def test_streaming_registration_makes_identity_available_to_next_record():
+    state={"people": {}}
+    plan={"plan_id":"plan-1","entities":[{"span_id":"s1","start":0,"end":12,
+        "kind":"person","identity_hint":"NEW_nadia","evidence_span_ids":["s1"],
+        "expected_text":"Nadia Haddad","confidence":"certain"}]}
+    registered,created=_register_identity_proposals(state,plan)
+    assert created==1
+    person_id=registered["entities"][0]["identity_hint"]
+    assert state["people"][person_id]["display_name"]=="Nadia Haddad"
+
+
+def test_known_contact_mapping_wins_over_generic_deterministic_detection():
+    generic={"span_id":"s1","start":6,"end":24,"kind":"personal_identifier",
+             "identity_hint":None,"evidence_span_ids":["s1"],
+             "expected_text":"nadia@example.test","confidence":"certain"}
+    owned={**generic,"kind":"contact","identity_hint":"PERSON_nadia"}
+    result=PrivacyAgent._dedupe_entities({"entities":[generic,owned]})
+    assert result["entities"]==[owned]
+
+
+def test_contact_cannot_be_owned_by_an_organization_identity():
+    span={"span_id":"s1","text":"Hansaring 82, 50670 Koln"}
+    result={"entities":[{"span_id":"s1","expected_text":span["text"],
+        "kind":"contact","identity_hint":"ORGANIZATION_acme","source_bound":True,
+        "start":0,"end":len(span["text"])}]}
+    entities,edits,reasons=PrivacyAgent(None)._validate_batch(result,[span],people={})
+    assert entities[0].identity_hint is None
+    assert edits[0].reason=="contact"
+    assert reasons==[]
+
+
+def test_pronouns_cannot_be_registered_as_people():
+    result={"entities":[{"kind":"person","expected_text":value} for value in
+                        ["I","He","She","Me","Them","Nadia Haddad"]]}
+    assert [value["expected_text"] for value in
+            PrivacyAgent._filter_model_entities(result)["entities"]]==["Nadia Haddad"]
+
+
+def test_email_owner_requires_name_corroboration():
+    people={"PERSON_kwame":{"display_name":"Kwame Boateng","contacts":[],"state":"active"},
+            "PERSON_nadia":{"display_name":"Nadia Haddad","contacts":[],"state":"active"}}
+    span={"span_id":"s1","text":"n.haddad@relexsolutions.example"}
+    result={"entities":[{"span_id":"s1","expected_text":span["text"],"kind":"contact",
+        "identity_hint":"PERSON_kwame","source_bound":True,"start":0,"end":len(span["text"])}]}
+    entities,_,_=PrivacyAgent(None)._validate_batch(result,[span],people=people)
+    assert entities[0].identity_hint is None
+
+    result={"entities":[{"span_id":"s1","expected_text":span["text"],"kind":"contact",
+        "identity_hint":"PERSON_nadia","source_bound":True,"start":0,"end":len(span["text"])}]}
+    entities,_,_=PrivacyAgent(None)._validate_batch(result,[span],people=people)
+    assert entities[0].identity_hint=="PERSON_nadia"
+
+
+def test_semantic_closure_merges_only_model_returned_source_ranges():
+    base={"entities":[],"edits":[],"corrections_used":0,"batch_hashes":[]}
+    finding={"span_id":"header","start":6,"end":18,"kind":"person",
+             "identity_hint":"PERSON_nadia","evidence_span_ids":["header"],
+             "expected_text":"Nadia Haddad","confidence":"certain"}
+    current={"entities":[finding],"edits":[{"span_id":"header","start":6,"end":18,
+             "expected_text":"Nadia Haddad","replacement":"PERSON_nadia","reason":"identity"}],
+             "corrections_used":0,"batch_hashes":["hash"]}
+    merged=_merge_privacy_plans(base,current)
+    assert merged["entities"]==[finding]
+    assert not any("Acme CFO" in str(value) for value in merged["entities"])
+
+
+@pytest.mark.asyncio
+async def test_record_processing_uses_bounded_parallelism():
+    import asyncio
+    class Handlers:
+        def __init__(self):self.active=0;self.peak=0
+        async def process_record(self,cap,ref):
+            self.active+=1;self.peak=max(self.peak,self.active)
+            await asyncio.sleep(0.01)
+            self.active-=1;return ref
+    handlers=Handlers()
+    result=await _process_records(handlers,None,list(range(8)),concurrency=3)
+    assert result==list(range(8))
+    assert handlers.peak==3
 
 
 def test_erasure_retains_unaffected_original_documents():
@@ -235,11 +350,11 @@ async def test_privacy_generation_has_bounded_output_budget():
 
 
 def test_privacy_batches_bound_structured_output_size():
-    assert PrivacyAgent.max_batch_codepoints == 800
+    assert PrivacyAgent.max_batch_codepoints == 2400
 
 
 @pytest.mark.asyncio
-async def test_privacy_masks_deterministically_protected_values_from_model_only():
+async def test_privacy_masks_deterministically_protected_values_and_fills_exact_known_names():
     text = "Tomas Lindholm contacted owner@example.test about Alice Unknown."
     provider = CapturingProvider()
     people = {"PERSON_tomas": {"display_name": "Tomas Lindholm", "contacts": [], "state": "active"}}
@@ -250,9 +365,11 @@ async def test_privacy_masks_deterministically_protected_values_from_model_only(
     assert "Tomas Lindholm" in model_text
     assert "owner@example.test" not in model_text
     assert "Alice Unknown" in model_text
+    # The model sees known names, while the application fills exact,
+    # unambiguous repetitions of identities the model already established.
     assert {(entity.kind, entity.expected_text) for entity in plan.entities} == {
         ("person", "Tomas Lindholm"),
-        ("personal_identifier", "owner@example.test"),
+        ("contact", "owner@example.test"),
     }
 
 
@@ -279,6 +396,19 @@ async def test_model_binds_initials_and_role_title_cannot_become_person():
         ("LF", "PERSON_lena")]
 
 
+@pytest.mark.asyncio
+async def test_small_model_detects_candidates_then_mapper_resolves_only_identity():
+    text = "LF met the Acme CFO on 30 April 2026."
+    people = {"PERSON_lena": {"display_name": "Lena Fischer", "contacts": [], "state": "active"}}
+    plan = await PrivacyAgent(CandidateMapperProvider(), CandidateDetectorProvider()).plan(
+        "project", "record", 1, [{"span_id": "s1", "text": text}],
+        hashlib.sha256(text.encode()).hexdigest(), people=people)
+    assert [(entity.kind, entity.expected_text, entity.identity_hint) for entity in plan.entities] == [
+        ("person", "LF", "PERSON_lena")]
+    assert [(edit.expected_text, edit.replacement) for edit in plan.edits] == [
+        ("LF", "PERSON_lena")]
+
+
 
 @pytest.mark.asyncio
 async def test_privacy_compiles_contact_entity_to_source_bound_edit():
@@ -287,7 +417,7 @@ async def test_privacy_compiles_contact_entity_to_source_bound_edit():
     plan = await PrivacyAgent(provider).plan("project", "record", 1, [{"span_id": "s1", "text": text}],
         hashlib.sha256(text.encode()).hexdigest())
     assert [(edit.reason, edit.expected_text, edit.replacement) for edit in plan.edits] == [
-        ("personal_identifier", "owner@example.test", "[personal identifier removed]")]
+        ("contact", "owner@example.test", "[contact removed]")]
     assert provider.calls == 1
 
 

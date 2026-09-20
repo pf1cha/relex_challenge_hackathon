@@ -1,6 +1,6 @@
 [Unit]
 Description=Relex application stack
-Wants=relex-postgres.service relex-qdrant.service relex-web.service relex-worker.service
+Wants=relex-postgres.service relex-qdrant.service relex-privacy-model.service relex-pii-detector.service relex-web.service relex-worker.service
 After=network.target
 
 [Install]

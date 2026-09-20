@@ -537,6 +537,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{p}/stale-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stale Reviews */
+        get: operations["stale_reviews_api_projects__p__stale_reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{p}/stale-reviews/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Stale Review */
+        post: operations["approve_stale_review_api_projects__p__stale_reviews__id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{p}/stale-reviews/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Stale Review */
+        post: operations["reject_stale_review_api_projects__p__stale_reviews__id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{p}/privacy/diagnostics": {
         parameters: {
             query?: never;
@@ -1114,6 +1165,13 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** Page[StaleReview] */
+        Page_StaleReview_: {
+            /** Items */
+            items: components["schemas"]["StaleReview"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** Page[TimelineRecord] */
         Page_TimelineRecord_: {
             /** Items */
@@ -1427,6 +1485,40 @@ export interface components {
             /** Text */
             text: string;
             source_location: components["schemas"]["SourceLocation"];
+        };
+        /** StaleReview */
+        StaleReview: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "replacement" | "cancellation" | "correction" | "reinstatement";
+            /** Scope */
+            scope: string;
+            /** Proposed Change */
+            proposed_change: string;
+            /** Reason */
+            reason: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "approved" | "rejected";
+            /** Stale Evidence */
+            stale_evidence: components["schemas"]["Receipt"][];
+            /** Marking Evidence */
+            marking_evidence: components["schemas"]["Receipt"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Reviewed By */
+            reviewed_by: string | null;
+            /** Reviewed At */
+            reviewed_at: string | null;
         };
         /** TimelineRecord */
         TimelineRecord: {
@@ -2665,6 +2757,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Job"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stale_reviews_api_projects__p__stale_reviews_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_StaleReview_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_stale_review_api_projects__p__stale_reviews__id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaleReview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_stale_review_api_projects__p__stale_reviews__id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaleReview"];
                 };
             };
             /** @description Validation Error */
