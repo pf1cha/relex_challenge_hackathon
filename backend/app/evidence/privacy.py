@@ -95,9 +95,9 @@ def person_occurs(record, person_id, people):
 
 class PrivacyAgent:
     """Mandatory bounded semantic classification with deterministic validation."""
-    policy_version = "privacy-r5-pii-shape-validation"
-    prompt_version = "privacy-plan-v8-minimal-pii"
-    max_batch_codepoints = 2000
+    policy_version = "privacy-r7-initial-variants-role-guard"
+    prompt_version = "privacy-plan-v10-initial-context"
+    max_batch_codepoints = 800
     response_schema = {
         "name": "privacy_plan_batch", "strict": True,
         "schema": {
@@ -109,8 +109,9 @@ class PrivacyAgent:
                         "span_id": {"type": "string"},
                         "kind": {"type": "string", "enum": ["person", "contact", "personal_identifier"]},
                         "expected_text": {"type": "string"},
+                        "identity_hint": {"type": ["string", "null"]},
                     },
-                    "required": ["span_id", "kind", "expected_text"],
+                    "required": ["span_id", "kind", "expected_text", "identity_hint"],
                     "additionalProperties": False,
                 }},
             },
@@ -124,6 +125,18 @@ class PrivacyAgent:
     def __init__(self, provider):
         self.provider = provider
 
+    @staticmethod
+    def _identity_variants(person):
+        """Expose conservative name forms for semantic identity comparison."""
+        display=(person.get("display_name") or "").strip()
+        variants=[display, *[contact.get("value") for contact in person.get("contacts",[])]]
+        parts=display.split()
+        if len(parts)>=2 and all(part for part in parts):
+            initials="".join(part[0].upper() for part in parts)
+            variants.extend([initials, f"{parts[0][0].upper()}. {parts[-1]}",
+                             f"{parts[0]} {parts[-1][0].upper()}."])
+        return list(dict.fromkeys(value for value in variants if value))
+
     def _batches(self, spans):
         batches=[];current=[];size=0
         for span in spans:
@@ -135,6 +148,22 @@ class PrivacyAgent:
             current.append(span);size += length
         if current:batches.append(current)
         return batches
+
+    @classmethod
+    def _model_text(cls, text, people):
+        """Hide PII already covered by deterministic validation from the semantic model."""
+        ranges=[]
+        for pattern in (EMAIL,PHONE,cls._personal_id):
+            ranges.extend((match.start(),match.end()) for match in pattern.finditer(text))
+        merged=[]
+        for start,end in sorted(ranges):
+            if merged and start<=merged[-1][1]:
+                merged[-1]=(merged[-1][0],max(merged[-1][1],end))
+            else:
+                merged.append((start,end))
+        for start,end in reversed(merged):
+            text=text[:start]+"[deterministically protected]"+text[end:]
+        return text
 
     @staticmethod
     def _contains(ranges, span_id, start, end, kinds=None):
@@ -158,8 +187,10 @@ class PrivacyAgent:
             item.pop("start",None);item.pop("end",None)
             item["start"]=matches[0];item["end"]=matches[0]+len(expected)
             item["evidence_span_ids"]=[item["span_id"]]
-            item["identity_hint"]=("NEW_"+hashlib.sha256(expected.casefold().encode()).hexdigest()[:12]
-                                   if item.get("kind")=="person" else None)
+            if item.get("kind")=="person" and not item.get("identity_hint"):
+                item["identity_hint"]="NEW_"+hashlib.sha256(expected.casefold().encode()).hexdigest()[:12]
+            elif item.get("kind")!="person":
+                item["identity_hint"]=None
             item["confidence"]="certain"
             resolved.append(item)
         result["entities"]=resolved
@@ -170,15 +201,17 @@ class PrivacyAgent:
         """Reject semantic labels whose source text cannot have the claimed PII shape."""
         blocked_name_parts={
             "account", "category", "customer", "data", "delivery", "director", "executive",
-            "gmbh", "lead", "manager", "officer", "org", "project", "protection", "relex",
-            "report", "solution", "subject", "team", "technical",
+            "architect", "ceo", "cfo", "consultant", "controller", "coo", "cto", "gmbh",
+            "lead", "manager", "officer", "org", "president", "project", "protection", "relex",
+            "report", "solution", "subject", "team", "technical", "vp",
         }
 
         def looks_like_person(value):
             parts=value.split()
             if not 1<=len(parts)<=4 or any(part.casefold() in blocked_name_parts for part in parts):
                 return False
-            return all(part[0].isupper() and all(char.isalpha() or char in "-'" for char in part)
+            return all((re.fullmatch(r"[A-Z]\.",part) is not None) or
+                       (part[0].isupper() and all(char.isalpha() or char in "-'" for char in part))
                        for part in parts if part)
 
         def looks_like_address(value):
@@ -309,6 +342,10 @@ class PrivacyAgent:
 
     def _validate_batch(self, result, spans, resolutions=(), people=None):
         result=self._resolve_entity_offsets(result,spans)
+        for entity in result.get("entities",[]):
+            hint=entity.get("identity_hint")
+            if hint and hint not in (people or {}) and not hint.startswith("NEW_"):
+                raise ValueError("unknown_identity_hint")
         result=self._filter_model_entities(result)
         result=self._enforce_deterministic_entities(result,spans)
         result=self._enforce_known_people(result,spans,people)
@@ -402,8 +439,13 @@ class PrivacyAgent:
     async def _generate(self, payload, prior=None, error=None):
         system=(
             "Find personal information in every supplied span. Return one JSON object containing only entities. "
-            "For each entity return span_id, expected_text copied verbatim from that span, and kind. "
+            "For each entity return span_id, expected_text copied verbatim from that span, kind, and identity_hint. "
             "Kinds are person, contact, and personal_identifier. Contact includes email, phone, and postal address. "
+            "For a person, compare spelling variants, shortened names, initials, and transcription variants against "
+            "the aliases and derived name_variants in known_identities. Initials such as LF can match Lena Fischer; "
+            "role abbreviations such as CFO are not people. Set identity_hint to that supplied ID only when the "
+            "reference is unambiguous and context supports it; otherwise null. "
+            "For non-person entities identity_hint must be null. "
             "When PII is ambiguous, use personal_identifier. Do not emit organizations, roles, dates, business status, "
             "private circumstances, warnings, or ordinary prose. Never invent source text. The application owns offsets, "
             "coverage, identity binding, confidence, and edits."
@@ -414,7 +456,7 @@ class PrivacyAgent:
             request["validation_error"]=error
             request["instruction"]="Correct the rejected output once; do not change or omit source coverage."
         try:
-            return await self.provider.generate("privacy",system,request,max_tokens=8192,
+            return await self.provider.generate("privacy",system,request,max_tokens=2048,
                                                 json_schema=self.response_schema,temperature=0)
         except Exception:
             raise DomainError("provider_unavailable") from None
@@ -425,7 +467,8 @@ class PrivacyAgent:
             raise DomainError("privacy_unresolved")
         resolutions=self._validate_resolutions(record_id,record_version,source_hash,spans,resolutions,people)
         batches=self._batches(spans);all_entities=[];all_edits=[];all_reasons=[];covered=[];hashes=[];corrections=0
-        known=[{"id":pid,"aliases":[person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]]}
+        known=[{"id":pid,"aliases":[person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]],
+                "name_variants":self._identity_variants(person)}
                for pid,person in sorted((people or {}).items())]
         for index,batch in enumerate(batches):
             batch_ids={span["span_id"] for span in batch}
@@ -435,7 +478,7 @@ class PrivacyAgent:
                      "admin_resolutions":batch_resolutions,
                      "previous_context":spans[spans.index(batch[0])-1]["text"][-500:] if spans.index(batch[0]) else None,
                      "next_context":spans[spans.index(batch[-1])+1]["text"][:500] if spans.index(batch[-1])+1<len(spans) else None,
-                     "spans":[{"span_id":span["span_id"],"text":span["text"]} for span in batch]}
+                     "spans":[{"span_id":span["span_id"],"text":self._model_text(span["text"],people)} for span in batch]}
             hashes.append(hashlib.sha256(json.dumps(payload["spans"],ensure_ascii=False,sort_keys=True).encode()).hexdigest())
             result=await self._generate(payload)
             for attempt in range(4):

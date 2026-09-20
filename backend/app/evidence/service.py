@@ -393,6 +393,45 @@ class EvidencePlatform:
         async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
             items=[Person.model_validate(p) for p in s["people"].values()]
             return self._page(items,page,self._binding(ctx,s,"people"))
+    def _processed_document_records(self,s,document_id):
+        records=[r for r in s["records"].values() if r["original_doc_id"]==document_id
+                 and r.get("published") and not r.get("quarantined")]
+        return sorted(records,key=lambda record:(record.get("source_time",{}).get("value") or "",record["record_id"] ))
+    def _original_document(self,s,ctx,d):
+        sources=[]
+        for record in self._processed_document_records(s,d["id"]):
+            if not record["spans"]: continue
+            first=record["spans"][0]["span_id"]
+            url=f"/projects/{quote(ctx.project_id,safe='')}/sources/{quote(record['record_id'],safe='')}?version={record['record_version']}&span={quote(first,safe='')}"
+            sources.append(ProcessedDocumentSource(record_id=record["record_id"],record_version=record["record_version"],title=record["title"],processed_content_url=url))
+        return OriginalDocument(id=d["id"],title=d["title"],record_type=d["record_type"],
+            processed_filename=d["title"],processed_sources=sources,
+            created_at=d["created_at"],updated_at=d["updated_at"])
+    async def list_original_documents(self,ctx,page):
+        async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
+            items=[self._original_document(s,ctx,d) for d in s["documents"].values()
+                   if not d.get("deleted") and self._processed_document_records(s,d["id"])]
+            items.sort(key=lambda item:(item.record_type,item.created_at,item.id))
+            return self._page(items,page,self._binding(ctx,s,"original_documents"))
+    async def get_original_document(self,ctx,document_id):
+        async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
+            d=self._document(s,document_id)
+            records=self._processed_document_records(s,document_id);require(records,"not_found")
+            content="\n".join(span["text"] for record in records
+                              for span in sorted(record["spans"],key=lambda item:item["ordinal"]))
+            return OriginalDocumentContent(**dump(self._original_document(s,ctx,d)),processed_content=content)
+    async def search_identity_mappings(self,ctx,query,page):
+        query=query.strip().casefold()
+        require(len(query)<=500,"invalid_input")
+        async with self.transaction(ctx,admin=True,restricted=True) as (_,s):
+            items=[]
+            for person_id,person in s["people"].items():
+                values=[person_id,person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]]
+                if query and not any(query in value.casefold() for value in values):continue
+                items.append(IdentityMapping(pseudonym=person_id,display_name=person["display_name"],
+                    kind=person["kind"],contacts=person.get("contacts",[]),state=person.get("state","active")))
+            items.sort(key=lambda item:(item.display_name.casefold(),item.pseudonym))
+            return self._page(items,page,self._binding(ctx,s,"identity_mappings",query))
     async def associate_person(self,ctx,input):
         require(1<=len(input.display_name)<=255 and all(1<=len(c.value)<=500 for c in input.contacts),"invalid_input")
         async with self.transaction(ctx,admin=True,write=True,restricted=True) as (_,s):
@@ -454,6 +493,10 @@ class EvidencePlatform:
         # Retry still performs every validation and never releases the barrier early.
         p=j["public"]
         if p["state"]=="failed" and p["kind"] in ("erase_person","delete_document") and p["stage"]=="rebuilding" and p["error_code"]=="contract_violation":
+            p["retryable"]=True
+        # A legacy worker could lose a capability exactly at a stage boundary;
+        # retry reconstructs the same fenced work under the current code.
+        if p["state"]=="failed" and p["kind"]=="ingest" and p["stage"]=="privacy_ready" and p["error_code"]=="capability_denied":
             p["retryable"]=True
 
     async def list_jobs(self,ctx,page):
@@ -725,8 +768,13 @@ class EvidencePlatform:
     def _cap(self,s,cap):
         j=s["jobs"].get(cap.job_id);require(j,"capability_denied")
         require(j["public"]["state"]=="running" and j["lease_token"]==cap.lease_token and j["expires_at"] and datetime.fromisoformat(j["expires_at"])>now(),"lease_lost")
-        require(cap.expires_at>now() and j["lifecycle_revision"]==s["lifecycle_revision"]==cap.lifecycle_revision and cap.allowed_stage==j["public"]["stage"],"capability_denied")
-        require(s["capabilities"].get(cap.capability_id)==dump(cap),"capability_denied")
+        stored=s["capabilities"].get(cap.capability_id);require(stored,"capability_denied")
+        # The caller holds an immutable snapshot; the persisted expiry advances
+        # with heartbeats. All other fields must still match exactly.
+        require(datetime.fromisoformat(stored["expires_at"])>now(),"capability_denied")
+        expected=dump(cap);expected["expires_at"]=stored["expires_at"]
+        require(stored==expected and j["lifecycle_revision"]==s["lifecycle_revision"]==cap.lifecycle_revision and
+                cap.allowed_stage==j["public"]["stage"],"capability_denied")
         return j
     @asynccontextmanager
     async def cap_transaction(self,cap):

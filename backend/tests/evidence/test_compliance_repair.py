@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from app.contracts.errors import DomainError
-from app.evidence.jobs import _proposed_person_id
+from app.evidence.jobs import (RECONCILIATION_REASONS, _known_person_matches,
+                               _proposed_person_id, _remove_affected_raw_sources)
 from app.evidence.parsing import parse
 from app.evidence.privacy import PrivacyAgent, validate_sanitized
 
@@ -21,20 +22,16 @@ class CorrectingProvider:
         schema = kwargs["json_schema"]
         entity = schema["schema"]["properties"]["entities"]["items"]
         assert schema["strict"] is True
-        assert set(entity["required"]) == {"span_id", "kind", "expected_text"}
+        assert set(entity["required"]) == {"span_id", "kind", "expected_text", "identity_hint"}
         assert entity["properties"]["kind"]["enum"] == [
             "person", "contact", "personal_identifier"]
         span = payload["spans"][0]
         name = "Åsa Öberg"
-        personal_id = "OP_ID 447102"
-        a = span["text"].index(name)
-        b = span["text"].index(personal_id)
         return {
             "complete": True,
             "covered_span_ids": [span["span_id"]],
             "entities": [
                 {"span_id": span["span_id"], "expected_text": name, "kind": "person"},
-                {"span_id": span["span_id"], "expected_text": personal_id, "kind": "personal_identifier"},
             ],
             "unresolved_reasons": [],
         }
@@ -47,6 +44,51 @@ class FailedProvider:
         raise RuntimeError("raw provider detail must not escape")
 
 
+class TokenBudgetProvider:
+    settings = SimpleNamespace(model="privacy-test")
+
+    async def generate(self, role, system, payload, **kwargs):
+        assert kwargs["max_tokens"] == 2048
+        return {"entities": []}
+
+
+class CapturingProvider:
+    settings = SimpleNamespace(model="privacy-test")
+
+    def __init__(self):
+        self.payloads = []
+
+    async def generate(self, role, system, payload, **kwargs):
+        self.payloads.append(payload)
+        return {"entities": []}
+
+
+class VariantBindingProvider:
+    settings = SimpleNamespace(model="privacy-test")
+
+    async def generate(self, role, system, payload, **kwargs):
+        assert payload["known_identities"][0]["id"] == "PERSON_tomas"
+        assert payload["known_identities"][0]["name_variants"] == [
+            "Tomas Lindholm", "TL", "T. Lindholm", "Tomas L."]
+        return {"entities": [{"span_id": "s1", "kind": "person",
+                              "expected_text": "T. Lindholm",
+                              "identity_hint": "PERSON_tomas"}]}
+
+
+class InitialAndRoleProvider:
+    settings = SimpleNamespace(model="privacy-test")
+
+    async def generate(self, role, system, payload, **kwargs):
+        assert payload["known_identities"][0]["name_variants"] == [
+            "Lena Fischer", "LF", "L. Fischer", "Lena F."]
+        return {"entities": [
+            {"span_id": "s1", "kind": "person", "expected_text": "LF",
+             "identity_hint": "PERSON_lena"},
+            {"span_id": "s2", "kind": "person", "expected_text": "Acme CFO",
+             "identity_hint": None},
+        ]}
+
+
 class UneditedContactProvider:
     settings = SimpleNamespace(model="privacy-test")
 
@@ -55,36 +97,14 @@ class UneditedContactProvider:
 
     async def generate(self, role, system, payload, **kwargs):
         self.calls += 1
-        span = payload["spans"][0]
-        value = "owner@example.test"
-        start = span["text"].index(value)
-        return {
-            "complete": True,
-            "covered_span_ids": [span["span_id"]],
-            "entities": [{"span_id": span["span_id"], "start": start, "end": start + len(value),
-                          "expected_text": value, "kind": "contact", "identity_hint": None,
-                          "evidence_span_ids": [span["span_id"]], "confidence": "certain"}],
-            "edits": [],
-            "unresolved_reasons": [],
-        }
+        return {"entities": []}
 
 
 class SystemCodeProvider:
     settings = SimpleNamespace(model="privacy-test")
 
     async def generate(self, role, system, payload, **kwargs):
-        span = payload["spans"][0]
-        value = "OP_ID SYS-447"
-        start = span["text"].index(value)
-        return {
-            "complete": True,
-            "covered_span_ids": [span["span_id"]],
-            "entities": [{"span_id": span["span_id"], "start": start, "end": start + len(value),
-                          "expected_text": value, "kind": "personal_identifier", "identity_hint": None,
-                          "evidence_span_ids": [span["span_id"]], "confidence": "certain"}],
-            "edits": [],
-            "unresolved_reasons": [],
-        }
+        return {"entities": []}
 
 
 class OverclassifyingProvider:
@@ -139,6 +159,37 @@ def test_existing_same_name_outside_upload_still_requires_review():
         "plan-b", "NEW_alex", "Alex Smith", {"alex smith": {"PERSON_existing"}}, {}) is None
 
 
+def test_unique_first_name_binding_matches_privacy_planner():
+    assert _known_person_matches(
+        "Marco", {"marco rossi": {"PERSON_marco"}}, {"marco": {"PERSON_marco"}}) == {"PERSON_marco"}
+    assert _known_person_matches(
+        "Alex", {}, {"alex": {"PERSON_one", "PERSON_two"}}) == {"PERSON_one", "PERSON_two"}
+
+
+def test_erasure_retains_unaffected_original_documents():
+    state = {
+        "documents": {
+            "affected": {"raw": "Kwame source", "raw_filename": "affected.txt"},
+            "unaffected": {"raw": "Other source", "raw_filename": "unaffected.txt"},
+        },
+        "records": {
+            "affected-record": {"original_doc_id": "affected", "raw_spans": ["private"]},
+            "unaffected-record": {"original_doc_id": "unaffected", "raw_spans": ["retained"]},
+        },
+    }
+    _remove_affected_raw_sources(state,{"affected"})
+    assert "raw" not in state["documents"]["affected"]
+    assert "raw_filename" not in state["documents"]["affected"]
+    assert state["documents"]["unaffected"]["raw"] == "Other source"
+    assert "raw_spans" not in state["records"]["affected-record"]
+    assert state["records"]["unaffected-record"]["raw_spans"] == ["retained"]
+
+
+def test_retry_recomputes_derived_identity_failures():
+    cached = {"unsupported identity binding", "provider-authored unresolved reason"}
+    assert cached - RECONCILIATION_REASONS == {"provider-authored unresolved reason"}
+
+
 @pytest.mark.asyncio
 async def test_privacy_plan_derives_unicode_codepoint_ranges():
     text = "Åsa Öberg owns OP_ID 447102 until November."
@@ -172,6 +223,61 @@ async def test_privacy_provider_failure_is_visible_and_safe():
         await PrivacyAgent(FailedProvider()).plan("project", "record", 1, [{"span_id": "s1", "text": text}],
             hashlib.sha256(text.encode()).hexdigest())
     assert failure.value.code == "provider_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_privacy_generation_has_bounded_output_budget():
+    text = "No deterministic trigger is present."
+    plan = await PrivacyAgent(TokenBudgetProvider()).plan(
+        "project", "record", 1, [{"span_id": "s1", "text": text}],
+        hashlib.sha256(text.encode()).hexdigest())
+    assert plan.complete is True
+
+
+def test_privacy_batches_bound_structured_output_size():
+    assert PrivacyAgent.max_batch_codepoints == 800
+
+
+@pytest.mark.asyncio
+async def test_privacy_masks_deterministically_protected_values_from_model_only():
+    text = "Tomas Lindholm contacted owner@example.test about Alice Unknown."
+    provider = CapturingProvider()
+    people = {"PERSON_tomas": {"display_name": "Tomas Lindholm", "contacts": [], "state": "active"}}
+    plan = await PrivacyAgent(provider).plan(
+        "project", "record", 1, [{"span_id": "s1", "text": text}],
+        hashlib.sha256(text.encode()).hexdigest(), people=people)
+    model_text = provider.payloads[0]["spans"][0]["text"]
+    assert "Tomas Lindholm" in model_text
+    assert "owner@example.test" not in model_text
+    assert "Alice Unknown" in model_text
+    assert {(entity.kind, entity.expected_text) for entity in plan.entities} == {
+        ("person", "Tomas Lindholm"),
+        ("personal_identifier", "owner@example.test"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_model_can_bind_name_variant_to_supplied_identity():
+    text = "T. Lindholm approved the plan."
+    people = {"PERSON_tomas": {"display_name": "Tomas Lindholm", "contacts": [], "state": "active"}}
+    plan = await PrivacyAgent(VariantBindingProvider()).plan(
+        "project", "record", 1, [{"span_id": "s1", "text": text}],
+        hashlib.sha256(text.encode()).hexdigest(), people=people)
+    assert [(entity.expected_text, entity.identity_hint) for entity in plan.entities] == [
+        ("T. Lindholm", "PERSON_tomas")]
+
+
+@pytest.mark.asyncio
+async def test_model_binds_initials_and_role_title_cannot_become_person():
+    spans = [{"span_id": "s1", "text": "LF"},
+             {"span_id": "s2", "text": "Robert Kahn (Acme CFO)"}]
+    text = "\n".join(span["text"] for span in spans)
+    people = {"PERSON_lena": {"display_name": "Lena Fischer", "contacts": [], "state": "active"}}
+    plan = await PrivacyAgent(InitialAndRoleProvider()).plan(
+        "project", "record", 1, spans, hashlib.sha256(text.encode()).hexdigest(), people=people)
+    assert [(entity.expected_text, entity.identity_hint) for entity in plan.entities] == [
+        ("LF", "PERSON_lena")]
+
 
 
 @pytest.mark.asyncio

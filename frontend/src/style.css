@@ -292,6 +292,26 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
 
 .administration-page > section { margin-top: 18px; }
 .administration-page button:not(.button-danger):not(.button-secondary) { min-height: 34px; padding: 7px 11px; font-size: 12px; }
+.admin-section { padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.admin-section > h3 { margin: 0; }
+.admin-section > .muted { margin: 5px 0 16px; font-size: 12px; }
+.original-document-library { margin-top: 8px; }
+.original-document-card { box-shadow: none; }
+.original-document-content { max-height: 420px; overflow: auto; margin: 12px 0 0; padding: 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-soft); color: var(--ink); font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; white-space: pre-wrap; }
+.original-document-content[hidden] { display: none; }
+.identity-search-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin: 14px 0; }
+.identity-search-form .field, .identity-search-form input { width: 100%; }
+.identity-results { display: grid; gap: 8px; }
+.identity-row { margin: 0; padding: 14px; box-shadow: none; }
+.identity-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.identity-heading > div { display: grid; gap: 3px; min-width: 0; }
+.identity-actions { display: flex; align-items: center; gap: 8px; }
+.identity-actions button { min-height: 30px; margin: 0; padding: 5px 9px; font-size: 11px; }
+.identity-heading strong { overflow-wrap: anywhere; color: var(--accent-dark); font: 700 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.identity-heading span:not(.role-badge) { font-size: 14px; font-weight: 750; }
+.identity-contacts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; margin: 12px 0 0; padding-top: 11px; border-top: 1px solid var(--line); font-size: 11px; }
+.identity-contacts dt { color: var(--ink-soft); font-weight: 750; text-transform: capitalize; }
+.identity-contacts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .admin-create-project { padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .admin-create-project h3 { margin: 0; }
 .admin-create-project p { margin: 5px 0 14px; }
@@ -370,6 +390,12 @@ mark { display: block; margin: 8px 0 16px; padding: 14px; border-left: 3px solid
   .member-row { grid-template-columns: 1fr; }
   .member-row button { width: 100%; }
   .member-access-form { grid-template-columns: 1fr; }
+  .identity-search-form { grid-template-columns: 1fr; }
+  .identity-heading { align-items: flex-start; flex-direction: column; }
+  .identity-actions { width: 100%; align-items: stretch; flex-direction: column; }
+  .identity-actions button { width: 100%; }
+  .identity-contacts { grid-template-columns: 1fr; }
+  .identity-contacts dd { margin-bottom: 5px; }
   .create-project-form .field, .create-project-form button { width: 100%; }
   .auth-layout { display: block; width: min(100% - 32px, 500px); padding: 38px 0; }
   .auth-intro { margin-bottom: 28px; }

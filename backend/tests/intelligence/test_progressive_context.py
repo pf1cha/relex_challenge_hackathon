@@ -72,6 +72,32 @@ def session():
     return owner, value
 
 
+def test_record_budget_charges_canonical_text_not_transport_metadata():
+    _, value = session()
+    summary = record_summary()
+    page = Result(record=summary, spans=[SimpleNamespace(text="source text")])
+
+    value.account(Result(record_page=page), page=True)
+
+    assert value.tokens == len(summary.title) + len("source text") + 256
+
+
+def test_maintenance_source_payload_omits_transport_metadata():
+    _, value = session()
+    key = ("record-1", 1)
+    value.records[key] = {"summary": record_summary()}
+    value.spans[key] = {
+        "span-2": SimpleNamespace(ordinal=2, text="second"),
+        "span-1": SimpleNamespace(ordinal=1, text="first"),
+    }
+
+    assert value.source_payload() == [{
+        "record_id": "record-1", "record_version": 1, "title": "Launch meeting",
+        "spans": [{"span_id": "span-1", "text": "first"},
+                  {"span_id": "span-2", "text": "second"}],
+    }]
+
+
 @pytest.mark.asyncio
 async def test_discovery_exposes_only_level_1_and_does_not_read_sources():
     owner, value = session()

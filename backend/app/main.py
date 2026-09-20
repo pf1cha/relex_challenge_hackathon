@@ -230,6 +230,18 @@ def create_app(services: Services, settings: HttpSettings) -> FastAPI:
         return Response(status_code=204)
     @app.get(base+"/people",response_model=Page[Person])
     async def people(ctx=Depends(admin),paging=Depends(page)): return await services.administration.list_people(ctx,paging)
+    @app.get(base+"/original-documents",response_model=Page[OriginalDocument])
+    async def original_documents(ctx=Depends(admin),paging=Depends(page)):
+        return await services.administration.list_original_documents(ctx,paging)
+    @app.get(base+"/original-documents/{id}",response_model=OriginalDocumentContent,dependencies=[Depends(no_query)])
+    async def original_document(id: Id,ctx=Depends(admin)):
+        return await services.administration.get_original_document(ctx,id)
+    @app.get(base+"/identity-mappings",response_model=Page[IdentityMapping])
+    async def identity_mappings(request: Request,q: Annotated[str,Query(max_length=500)]="",
+                                cursor: str|None=None,limit: Annotated[int,Query(ge=1,le=100)]=25,
+                                ctx=Depends(admin)):
+        queries(request,("q","cursor","limit"))
+        return await services.administration.search_identity_mappings(ctx,q,PageRequest(cursor=cursor,limit=limit))
     @app.post(base+"/people",response_model=Person,dependencies=[Depends(no_query)])
     async def associate(body: PersonInput,ctx=Depends(admin)):
         if not 1<=len(body.display_name)<=255 or any(not 1<=len(c.value)<=500 for c in body.contacts):

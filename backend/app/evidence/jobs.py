@@ -21,6 +21,27 @@ def _proposed_person_id(plan_id, hint, value, aliases, batch_ids):
     batch_ids[hint]=person_id
     return person_id
 
+
+def _known_person_matches(value, aliases, first_names):
+    return aliases.get(value.casefold(),set()) or first_names.get(value.casefold(),set())
+
+
+def _remove_affected_raw_sources(state, document_ids):
+    for document_id in document_ids:
+        if document_id in state["documents"]:
+            state["documents"][document_id].pop("raw",None)
+            state["documents"][document_id].pop("raw_filename",None)
+    for record in state["records"].values():
+        if record["original_doc_id"] in document_ids:
+            record.pop("raw_spans",None)
+
+
+RECONCILIATION_REASONS={
+    "uncertain person identity", "unsupported identity binding",
+    "same-name identity requires admin resolution", "person lacks evidence-bound identity proposal",
+    "semantic classification unresolved", "identity edit is unresolved",
+}
+
 SEQUENCES={
 "ingest":["received","parsed","privacy_ready","extracted","indexed","published"],
 "activate":["received","rebuilding","indexed","published"],
@@ -111,6 +132,11 @@ class Jobs:
     async def heartbeat(self,lease):
         def apply(s,j):
             j["expires_at"]=(now()+timedelta(seconds=self.p.lease_seconds)).isoformat()
+            # Capabilities are lease-bound. Renew their persisted expiry with
+            # the lease while preserving every authorization fence.
+            for raw in s["capabilities"].values():
+                if raw["job_id"]==j["public"]["id"] and raw["lease_token"]==j["lease_token"]:
+                    raw["expires_at"]=j["expires_at"]
             return self._lease(j)
         return await self._mutate(lease,apply)
     async def advance(self,lease,expected_stage,next_stage,counts):
@@ -248,11 +274,13 @@ class Jobs:
                     require(record["record_version"]==plan["record_version"] and record["source_hash"]==plan["source_hash"],"evidence_changed")
                     by_id={"title:"+record["record_id"]:s["documents"][record["original_doc_id"]]["raw_filename"],
                            **{span["span_id"]:span["text"] for span in record["raw_spans"]}}
-                    unresolved=set(plan["unresolved_reasons"])
-                    aliases={}
+                    unresolved=set(plan["unresolved_reasons"])-RECONCILIATION_REASONS
+                    aliases={};first_names={}
                     for pid,person in s["people"].items():
                         for alias in [person["display_name"],*[contact["value"] for contact in person.get("contacts",[])]]:
                             aliases.setdefault(alias.casefold(),set()).add(pid)
+                        if len(person["display_name"].split())>1:
+                            first_names.setdefault(person["display_name"].split()[0].casefold(),set()).add(pid)
                     approved_bindings=set()
                     for resolution in s.get("privacy_resolutions",{}).values():
                         if resolution["decision"].startswith("bind:"):
@@ -263,9 +291,13 @@ class Jobs:
                             if entity["confidence"]=="uncertain":
                                 unresolved.add("uncertain person identity")
                             elif hint in s["people"]:
-                                matches=aliases.get(value.casefold(),set())
+                                matches=_known_person_matches(value,aliases,first_names)
                                 approved=(entity["span_id"],entity["start"],entity["end"],hint) in approved_bindings
-                                if hint not in matches or len(matches)>1 and not approved:unresolved.add("unsupported identity binding")
+                                # Exact lexical conflicts remain reviewable. With no
+                                # lexical match, the validated model hint supplies the
+                                # semantic spelling/initial/transcription comparison.
+                                if matches and (hint not in matches or len(matches)>1 and not approved):
+                                    unresolved.add("unsupported identity binding")
                             elif hint and hint.startswith("NEW_"):
                                 pid=_proposed_person_id(plan["plan_id"],hint,value,aliases,new_ids)
                                 if pid is None:
@@ -399,10 +431,11 @@ class Jobs:
                             r["person_ids"]=[x for x in r["person_ids"] if x!=pid]
                             r.pop("raw_spans",None);r.pop("source_hash",None)
                             r["chunk_ids"]=[];r["entry_ids"]=[]
-                    # Retained raw uploads are deleted project-wide; safe normalized facts remain.
-                    # This avoids global replacement of a shared, ambiguous name.
-                    for d in s["documents"].values():d.pop("raw",None);d.pop("raw_filename",None)
-                    for r in s["records"].values():r.pop("raw_spans",None)
+                    # Remove retained source uploads only for documents whose records
+                    # contain the erased identity. Unrelated originals remain available
+                    # to restricted administrators; normalized records are still rebuilt
+                    # from the affected documents without the identity.
+                    _remove_affected_raw_sources(s,affected)
                     # Pending uploads cannot be proven sanitized; fail visibly with no content retained.
                     for job in s["jobs"].values():
                         if job is not j and job["public"]["state"]!="completed" and job["public"]["kind"]=="ingest":

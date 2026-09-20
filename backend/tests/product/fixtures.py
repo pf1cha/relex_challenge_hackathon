@@ -31,6 +31,14 @@ class FixtureServices:
     async def delete_project(self,ctx):
         self.calls.append("delete_project")
     async def list_documents(self,ctx,page): return Page[Document](items=[],next_cursor=None)
+    async def list_original_documents(self,ctx,page):
+        return Page[OriginalDocument](items=[OriginalDocument(id="fixture-document",title="Fixture source",record_type="report",processed_filename="fixture.txt",processed_sources=[ProcessedDocumentSource(record_id="fixture-record",record_version=1,title="Fixture processed source",processed_content_url="/projects/fixture-project/sources/fixture-record?version=1&span=fixture-span")],created_at=datetime.now(timezone.utc),updated_at=datetime.now(timezone.utc))],next_cursor=None)
+    async def get_original_document(self,ctx,document_id):
+        if document_id!="fixture-document": raise DomainError("not_found")
+        return OriginalDocumentContent(id=document_id,title="Fixture source",record_type="report",processed_filename="fixture.txt",processed_sources=[],processed_content="PERSON_fixture source.",created_at=datetime.now(timezone.utc),updated_at=datetime.now(timezone.utc))
+    async def search_identity_mappings(self,ctx,query,page):
+        item=IdentityMapping(pseudonym="PERSON_fixture",display_name="Fixture Person",kind="client",contacts=[Contact(kind="email",value="fixture-person@example.test")],state="active")
+        return Page[IdentityMapping](items=[item] if not query or query.casefold() in (item.pseudonym+item.display_name+item.contacts[0].value).casefold() else [],next_cursor=None)
     async def get_status(self,ctx):
         return ProjectStatus(project_id=ctx.project_id,eligible_documents=0,eligible_records=0,operational_job_counts={},write_barrier=False,snapshot=Snapshot(corpus_generation=1,privacy_generation=0))
     async def get_overview(self,ctx):

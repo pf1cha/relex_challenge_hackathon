@@ -99,6 +99,24 @@ class Document(DTO):
     created_at: Instant
     updated_at: Instant
 
+class ProcessedDocumentSource(DTO):
+    record_id: Id
+    record_version: Version
+    title: str
+    processed_content_url: str
+
+class OriginalDocument(DTO):
+    id: Id
+    title: str
+    record_type: RecordType
+    processed_filename: str
+    processed_sources: list[ProcessedDocumentSource]
+    created_at: Instant
+    updated_at: Instant
+
+class OriginalDocumentContent(OriginalDocument):
+    processed_content: str
+
 class RecordSummary(DTO):
     record_id: Id
     original_doc_id: Id
@@ -265,6 +283,13 @@ class Member(DTO):
 
 class Person(DTO):
     id: Id
+    display_name: str
+    kind: Literal['client', 'employee']
+    contacts: list[Contact]
+    state: Literal['active', 'erasing']
+
+class IdentityMapping(DTO):
+    pseudonym: Id
     display_name: str
     kind: Literal['client', 'employee']
     contacts: list[Contact]

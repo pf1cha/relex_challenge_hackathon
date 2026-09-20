@@ -27,8 +27,16 @@ class ToolSession:
 
     def account(self,value,page=False):
         # Conservative Unicode-codepoint bound; never counts a large source as zero tokens.
-        text=value.model_dump_json() if hasattr(value,"model_dump_json") else str(value)
-        charge=len(text)
+        if page and hasattr(value,"record_page"):
+            # Transport metadata is not model evidence. Charge canonical source
+            # text plus a fixed envelope, not repeated provenance and IDs.
+            record_page=value.record_page
+            text=(getattr(record_page.record,"title","") or "")+"".join(
+                getattr(span,"text","") for span in getattr(record_page,"spans",[]))
+            charge=len(text)+256
+        else:
+            text=value.model_dump_json() if hasattr(value,"model_dump_json") else str(value)
+            charge=len(text)
         if self.tokens+charge>self.limits.source_tokens_per_phase or (page and self.pages>=self.limits.pages_per_phase):
             self.exhausted=True;raise BudgetExhausted()
         self.tokens+=charge;self.pages+=int(page)
@@ -121,6 +129,13 @@ class ToolSession:
         self.results.append({"tool":name,"result":result.model_dump(mode="json")})
         self.trace.append({"tool":name,"ids":trace_ids,"calls":self.calls,"pages":self.pages,"source_tokens_bound":self.tokens,"search_rounds":self.searches})
         return result
+
+    def source_payload(self):
+        """Return canonical evidence without repeated transport metadata."""
+        return [{"record_id":key[0],"record_version":key[1],"title":record["summary"].title,
+                 "spans":[{"span_id":span_id,"text":span.text}
+                          for span_id,span in sorted(self.spans.get(key,{}).items(),key=lambda item:item[1].ordinal)]}
+                for key,record in sorted(self.records.items())]
 
     async def discover(self,query):
         # Discovery is intentionally L1-only. The agent decides whether to issue

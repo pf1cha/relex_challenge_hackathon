@@ -166,6 +166,194 @@
             }
           }
         }
+      },
+      "post": {
+        "summary": "Create Project",
+        "operationId": "create_project_api_projects_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Project"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{p}": {
+      "delete": {
+        "summary": "Delete Project",
+        "operationId": "delete_project_api_projects__p__delete",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{p}/types": {
+      "get": {
+        "summary": "Project Types",
+        "operationId": "project_types_api_projects__p__types_get",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ProjectType_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create Project Type",
+        "operationId": "create_project_type_api_projects__p__types_post",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectTypeInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectType"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/projects/{p}/documents": {
@@ -1591,6 +1779,207 @@
         }
       }
     },
+    "/api/projects/{p}/original-documents": {
+      "get": {
+        "summary": "Original Documents",
+        "operationId": "original_documents_api_projects__p__original_documents_get",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_OriginalDocument_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{p}/original-documents/{id}": {
+      "get": {
+        "summary": "Original Document",
+        "operationId": "original_document_api_projects__p__original_documents__id__get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "Id"
+            }
+          },
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OriginalDocumentContent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{p}/identity-mappings": {
+      "get": {
+        "summary": "Identity Mappings",
+        "operationId": "identity_mappings_api_projects__p__identity_mappings_get",
+        "parameters": [
+          {
+            "name": "p",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "title": "P"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 500,
+              "default": "",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_IdentityMapping_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/projects/{p}/people/{id}/erase": {
       "post": {
         "summary": "Erase",
@@ -2054,12 +2443,6 @@
           },
           "record_type": {
             "type": "string",
-            "enum": [
-              "email",
-              "transcript",
-              "report",
-              "specification"
-            ],
             "title": "Record Type"
           }
         },
@@ -2300,24 +2683,15 @@
             "minLength": 1,
             "title": "Id"
           },
-          "project_id": {
-            "type": "string",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Project Id"
-          },
           "title": {
             "type": "string",
             "title": "Title"
           },
           "record_type": {
             "type": "string",
-            "enum": [
-              "email",
-              "transcript",
-              "report",
-              "specification"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9 _-]*$",
             "title": "Record Type"
           },
           "ai_status": {
@@ -2374,7 +2748,6 @@
         "type": "object",
         "required": [
           "id",
-          "project_id",
           "title",
           "record_type",
           "ai_status",
@@ -2438,12 +2811,9 @@
           "record_types": {
             "items": {
               "type": "string",
-              "enum": [
-                "email",
-                "transcript",
-                "report",
-                "specification"
-              ]
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z0-9][a-z0-9 _-]*$"
             },
             "type": "array",
             "title": "Record Types"
@@ -2492,6 +2862,53 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "IdentityMapping": {
+        "properties": {
+          "pseudonym": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Pseudonym"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "client",
+              "employee"
+            ],
+            "title": "Kind"
+          },
+          "contacts": {
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            },
+            "type": "array",
+            "title": "Contacts"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "erasing"
+            ],
+            "title": "State"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pseudonym",
+          "display_name",
+          "kind",
+          "contacts",
+          "state"
+        ],
+        "title": "IdentityMapping"
       },
       "Job": {
         "properties": {
@@ -2875,6 +3292,119 @@
         ],
         "title": "Option"
       },
+      "OriginalDocument": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "record_type": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9 _-]*$",
+            "title": "Record Type"
+          },
+          "processed_filename": {
+            "type": "string",
+            "title": "Processed Filename"
+          },
+          "processed_sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessedDocumentSource"
+            },
+            "type": "array",
+            "title": "Processed Sources"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "record_type",
+          "processed_filename",
+          "processed_sources",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OriginalDocument"
+      },
+      "OriginalDocumentContent": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "record_type": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9 _-]*$",
+            "title": "Record Type"
+          },
+          "processed_filename": {
+            "type": "string",
+            "title": "Processed Filename"
+          },
+          "processed_sources": {
+            "items": {
+              "$ref": "#/components/schemas/ProcessedDocumentSource"
+            },
+            "type": "array",
+            "title": "Processed Sources"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "processed_content": {
+            "type": "string",
+            "title": "Processed Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "record_type",
+          "processed_filename",
+          "processed_sources",
+          "created_at",
+          "updated_at",
+          "processed_content"
+        ],
+        "title": "OriginalDocumentContent"
+      },
       "Overview": {
         "properties": {
           "state": {
@@ -3010,6 +3540,35 @@
         ],
         "title": "Page[Document]"
       },
+      "Page_IdentityMapping_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IdentityMapping"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[IdentityMapping]"
+      },
       "Page_Job_": {
         "properties": {
           "items": {
@@ -3097,6 +3656,35 @@
         ],
         "title": "Page[Message]"
       },
+      "Page_OriginalDocument_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OriginalDocument"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[OriginalDocument]"
+      },
       "Page_Person_": {
         "properties": {
           "items": {
@@ -3154,6 +3742,35 @@
           "next_cursor"
         ],
         "title": "Page[PrivacyDiagnostic]"
+      },
+      "Page_ProjectType_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProjectType"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[ProjectType]"
       },
       "Page_Project_": {
         "properties": {
@@ -3452,6 +4069,38 @@
         ],
         "title": "PrivacyResolutionInput"
       },
+      "ProcessedDocumentSource": {
+        "properties": {
+          "record_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Record Id"
+          },
+          "record_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Record Version"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "processed_content_url": {
+            "type": "string",
+            "title": "Processed Content Url"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "record_id",
+          "record_version",
+          "title",
+          "processed_content_url"
+        ],
+        "title": "ProcessedDocumentSource"
+      },
       "Project": {
         "properties": {
           "id": {
@@ -3481,6 +4130,22 @@
           "role"
         ],
         "title": "Project"
+      },
+      "ProjectInput": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProjectInput"
       },
       "ProjectStatus": {
         "properties": {
@@ -3540,6 +4205,40 @@
         ],
         "title": "ProjectStatus"
       },
+      "ProjectType": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9 _-]*$",
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProjectType"
+      },
+      "ProjectTypeInput": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9 _-]*$",
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProjectTypeInput"
+      },
       "Receipt": {
         "properties": {
           "id": {
@@ -3565,12 +4264,9 @@
           },
           "record_type": {
             "type": "string",
-            "enum": [
-              "email",
-              "transcript",
-              "report",
-              "specification"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9 _-]*$",
             "title": "Record Type"
           },
           "source_time": {
@@ -3722,12 +4418,9 @@
           },
           "record_type": {
             "type": "string",
-            "enum": [
-              "email",
-              "transcript",
-              "report",
-              "specification"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9 _-]*$",
             "title": "Record Type"
           },
           "source_time": {
@@ -3849,12 +4542,9 @@
             "anyOf": [
               {
                 "type": "string",
-                "enum": [
-                  "email",
-                  "transcript",
-                  "report",
-                  "specification"
-                ]
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z0-9][a-z0-9 _-]*$"
               },
               {
                 "type": "null"
@@ -4260,12 +4950,9 @@
           },
           "record_type": {
             "type": "string",
-            "enum": [
-              "email",
-              "transcript",
-              "report",
-              "specification"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9 _-]*$",
             "title": "Record Type"
           },
           "source_time": {

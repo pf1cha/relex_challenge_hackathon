@@ -82,7 +82,43 @@ export interface paths {
         /** Projects */
         get: operations["projects_api_projects_get"];
         put?: never;
+        /** Create Project */
+        post: operations["create_project_api_projects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{p}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
         post?: never;
+        /** Delete Project */
+        delete: operations["delete_project_api_projects__p__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{p}/types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Project Types */
+        get: operations["project_types_api_projects__p__types_get"];
+        put?: never;
+        /** Create Project Type */
+        post: operations["create_project_type_api_projects__p__types_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -433,6 +469,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{p}/original-documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Original Documents */
+        get: operations["original_documents_api_projects__p__original_documents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{p}/original-documents/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Original Document */
+        get: operations["original_document_api_projects__p__original_documents__id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/projects/{p}/identity-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Identity Mappings */
+        get: operations["identity_mappings_api_projects__p__identity_mappings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/projects/{p}/people/{id}/erase": {
         parameters: {
             query?: never;
@@ -582,11 +669,8 @@ export interface components {
         Body_upload_api_projects__p__documents_post: {
             /** File */
             file: string;
-            /**
-             * Record Type
-             * @enum {string}
-             */
-            record_type: "email" | "transcript" | "report" | "specification";
+            /** Record Type */
+            record_type: string;
         };
         /** ChatInput */
         ChatInput: {
@@ -666,15 +750,10 @@ export interface components {
         Document: {
             /** Id */
             id: string;
-            /** Project Id */
-            project_id: string;
             /** Title */
             title: string;
-            /**
-             * Record Type
-             * @enum {string}
-             */
-            record_type: "email" | "transcript" | "report" | "specification";
+            /** Record Type */
+            record_type: string;
             /**
              * Ai Status
              * @enum {string}
@@ -718,7 +797,7 @@ export interface components {
         /** FilterOptions */
         FilterOptions: {
             /** Record Types */
-            record_types: ("email" | "transcript" | "report" | "specification")[];
+            record_types: string[];
             /** Documents */
             documents: components["schemas"]["Option"][];
             /** Topics */
@@ -730,6 +809,25 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** IdentityMapping */
+        IdentityMapping: {
+            /** Pseudonym */
+            pseudonym: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "client" | "employee";
+            /** Contacts */
+            contacts: components["schemas"]["Contact"][];
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "active" | "erasing";
         };
         /** Job */
         Job: {
@@ -866,6 +964,54 @@ export interface components {
             /** Label */
             label: string;
         };
+        /** OriginalDocument */
+        OriginalDocument: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Record Type */
+            record_type: string;
+            /** Processed Filename */
+            processed_filename: string;
+            /** Processed Sources */
+            processed_sources: components["schemas"]["ProcessedDocumentSource"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** OriginalDocumentContent */
+        OriginalDocumentContent: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Record Type */
+            record_type: string;
+            /** Processed Filename */
+            processed_filename: string;
+            /** Processed Sources */
+            processed_sources: components["schemas"]["ProcessedDocumentSource"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Processed Content */
+            processed_content: string;
+        };
         /** Overview */
         Overview: {
             /**
@@ -898,6 +1044,13 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** Page[IdentityMapping] */
+        Page_IdentityMapping_: {
+            /** Items */
+            items: components["schemas"]["IdentityMapping"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** Page[Job] */
         Page_Job_: {
             /** Items */
@@ -919,6 +1072,13 @@ export interface components {
             /** Next Cursor */
             next_cursor: string | null;
         };
+        /** Page[OriginalDocument] */
+        Page_OriginalDocument_: {
+            /** Items */
+            items: components["schemas"]["OriginalDocument"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
         /** Page[Person] */
         Page_Person_: {
             /** Items */
@@ -930,6 +1090,13 @@ export interface components {
         Page_PrivacyDiagnostic_: {
             /** Items */
             items: components["schemas"]["PrivacyDiagnostic"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** Page[ProjectType] */
+        Page_ProjectType_: {
+            /** Items */
+            items: components["schemas"]["ProjectType"][];
             /** Next Cursor */
             next_cursor: string | null;
         };
@@ -1026,6 +1193,17 @@ export interface components {
             /** Resolution */
             resolution: string;
         };
+        /** ProcessedDocumentSource */
+        ProcessedDocumentSource: {
+            /** Record Id */
+            record_id: string;
+            /** Record Version */
+            record_version: number;
+            /** Title */
+            title: string;
+            /** Processed Content Url */
+            processed_content_url: string;
+        };
         /** Project */
         Project: {
             /** Id */
@@ -1037,6 +1215,11 @@ export interface components {
              * @enum {string}
              */
             role: "member" | "admin";
+        };
+        /** ProjectInput */
+        ProjectInput: {
+            /** Name */
+            name: string;
         };
         /** ProjectStatus */
         ProjectStatus: {
@@ -1054,6 +1237,16 @@ export interface components {
             write_barrier: boolean;
             snapshot: components["schemas"]["Snapshot"];
         };
+        /** ProjectType */
+        ProjectType: {
+            /** Name */
+            name: string;
+        };
+        /** ProjectTypeInput */
+        ProjectTypeInput: {
+            /** Name */
+            name: string;
+        };
         /** Receipt */
         Receipt: {
             /** Id */
@@ -1065,11 +1258,8 @@ export interface components {
             source_url: string;
             /** Source Title */
             source_title: string;
-            /**
-             * Record Type
-             * @enum {string}
-             */
-            record_type: "email" | "transcript" | "report" | "specification";
+            /** Record Type */
+            record_type: string;
             source_time: components["schemas"]["SourceTime"];
             /** Source Locations */
             source_locations: components["schemas"]["SourceLocation"][];
@@ -1112,11 +1302,8 @@ export interface components {
             record_version: number;
             /** Title */
             title: string;
-            /**
-             * Record Type
-             * @enum {string}
-             */
-            record_type: "email" | "transcript" | "report" | "specification";
+            /** Record Type */
+            record_type: string;
             source_time: components["schemas"]["SourceTime"];
             /** Total Chunks */
             total_chunks: number;
@@ -1150,7 +1337,7 @@ export interface components {
             /** Date To */
             date_to?: string | null;
             /** Record Type */
-            record_type?: ("email" | "transcript" | "report" | "specification") | null;
+            record_type?: string | null;
             /** Original Doc Id */
             original_doc_id?: string | null;
             /** Topic Id */
@@ -1253,11 +1440,8 @@ export interface components {
             record_version: number;
             /** Title */
             title: string;
-            /**
-             * Record Type
-             * @enum {string}
-             */
-            record_type: "email" | "transcript" | "report" | "specification";
+            /** Record Type */
+            record_type: string;
             source_time: components["schemas"]["SourceTime"];
             /** Level1 Summary */
             level1_summary: string | null;
@@ -1411,6 +1595,137 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Page_Project_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_api_projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Project"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_project_api_projects__p__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    project_types_api_projects__p__types_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ProjectType_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_type_api_projects__p__types_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProjectTypeInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectType"];
                 };
             };
             /** @description Validation Error */
@@ -2217,6 +2532,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Person"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    original_documents_api_projects__p__original_documents_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_OriginalDocument_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    original_document_api_projects__p__original_documents__id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OriginalDocumentContent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    identity_mappings_api_projects__p__identity_mappings_get: {
+        parameters: {
+            query?: {
+                q?: string;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                p: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_IdentityMapping_"];
                 };
             };
             /** @description Validation Error */

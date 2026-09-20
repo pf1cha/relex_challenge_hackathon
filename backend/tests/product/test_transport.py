@@ -73,3 +73,25 @@ async def test_admin_can_delete_project_with_csrf():
         headers["X-CSRF-Token"]=login.json()["csrf_token"]
         deleted=await client.delete("/api/projects/fixture-project",headers=headers)
         assert deleted.status_code==204 and fixture.calls==["delete_project"]
+
+
+@pytest.mark.asyncio
+async def test_admin_original_documents_and_identity_mapping_routes():
+    fixture=FixtureServices()
+    app=create_app(fixture.services(),HttpSettings(secure_cookie=False,allow_loopback_http=True))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://127.0.0.1:18080") as client:
+        headers={"Origin":"http://127.0.0.1:18080"}
+        assert (await client.post("/api/login",json={"email":"fixture@synthetic.invalid","password":"synthetic-password"},headers=headers)).status_code==200
+
+        originals=await client.get("/api/projects/fixture-project/original-documents")
+        assert originals.status_code==200
+        assert originals.json()["items"][0]["processed_filename"]=="fixture.txt"
+        source=originals.json()["items"][0]["processed_sources"][0]
+        assert source=={"record_id":"fixture-record","record_version":1,"title":"Fixture processed source","processed_content_url":"/projects/fixture-project/sources/fixture-record?version=1&span=fixture-span"}
+        assert "processed_content" not in originals.json()["items"][0]
+        original=await client.get("/api/projects/fixture-project/original-documents/fixture-document")
+        assert original.status_code==200 and original.json()["processed_content"]=="PERSON_fixture source."
+        assert "raw_content" not in original.text
+        mappings=await client.get("/api/projects/fixture-project/identity-mappings?q=PERSON_fixture")
+        assert mappings.status_code==200 and mappings.json()["items"][0]["display_name"]=="Fixture Person"
+        assert (await client.get("/api/projects/fixture-project/identity-mappings?unknown=1")).status_code==422
